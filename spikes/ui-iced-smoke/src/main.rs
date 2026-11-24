@@ -90,7 +90,11 @@ impl UiSpike {
             let label = column![
                 text(format!("Pane ID: {}", pane.pane_id)).size(20),
                 text(format!("Session ID: {}", pane.session_id)),
-                text(if focused == Some(id) { "FOCUSED" } else { "Click to focus" }),
+                text(if focused == Some(id) {
+                    "FOCUSED"
+                } else {
+                    "Click to focus"
+                }),
                 button("Close pane").on_press(Message::Close(id)),
             ]
             .spacing(8);
@@ -122,7 +126,10 @@ mod tests {
 
         assert_eq!(app.panes.len(), 2);
         assert_eq!(
-            app.panes.get(original_pane).expect("original pane remains").session_id,
+            app.panes
+                .get(original_pane)
+                .expect("original pane remains")
+                .session_id,
             original_session
         );
 
