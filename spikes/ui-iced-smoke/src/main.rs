@@ -1,7 +1,5 @@
 use iced::widget::pane_grid::{self, PaneGrid};
-use iced::widget::{
-    Column, button, column, container, row, scrollable, space, text, text_input,
-};
+use iced::widget::{Column, button, column, container, row, scrollable, space, text, text_input};
 use iced::{Element, Fill, Length};
 
 fn main() -> iced::Result {
@@ -530,7 +528,8 @@ mod tests {
 
     #[test]
     fn file_virtualization_materializes_only_a_viewport_sized_window() {
-        let range = visible_file_range(10_000, 24_000.0, 156.0, FILE_ROW_HEIGHT, FILE_LIST_OVERSCAN);
+        let range =
+            visible_file_range(10_000, 24_000.0, 156.0, FILE_ROW_HEIGHT, FILE_LIST_OVERSCAN);
         assert_eq!(range.start, 997);
         assert!(range.len() <= 20);
         assert!(range.contains(&1_000));
@@ -538,14 +537,23 @@ mod tests {
 
     #[test]
     fn file_virtualization_clamps_at_the_end_of_the_dataset() {
-        let range = visible_file_range(10_000, 999_999.0, 156.0, FILE_ROW_HEIGHT, FILE_LIST_OVERSCAN);
+        let range = visible_file_range(
+            10_000,
+            999_999.0,
+            156.0,
+            FILE_ROW_HEIGHT,
+            FILE_LIST_OVERSCAN,
+        );
         assert_eq!(range.end, 10_000);
         assert!(range.start < range.end);
     }
 
     #[test]
     fn empty_file_virtualization_range_is_empty() {
-        assert_eq!(visible_file_range(0, 0.0, FILE_LIST_HEIGHT, FILE_ROW_HEIGHT, 3), 0..0);
+        assert_eq!(
+            visible_file_range(0, 0.0, FILE_LIST_HEIGHT, FILE_ROW_HEIGHT, 3),
+            0..0
+        );
     }
 
     #[test]
