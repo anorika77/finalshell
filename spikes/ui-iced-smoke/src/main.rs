@@ -153,7 +153,10 @@ mod tests {
 
         assert_eq!(app.panes.len(), 1);
         assert_eq!(
-            app.panes.get(original_pane).expect("original pane remains").session_id,
+            app.panes
+                .get(original_pane)
+                .expect("original pane remains")
+                .session_id,
             original_session
         );
     }
