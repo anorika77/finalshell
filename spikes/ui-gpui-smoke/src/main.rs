@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use gpui::{App, Context, Div, QuitMode, Window, WindowOptions, div, prelude::*, px};
+use gpui::{AnyElement, App, Context, QuitMode, Window, WindowOptions, div, prelude::*, px};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SplitAxis {
@@ -170,7 +170,7 @@ fn render_pane_node(
     node: &PaneNode,
     focused_pane_id: u64,
     cx: &Context<WorkspacePrototype>,
-) -> Div {
+) -> AnyElement {
     match node {
         PaneNode::Leaf(pane) => {
             let pane_id = pane.pane_id;
@@ -190,6 +190,7 @@ fn render_pane_node(
                     this.focused_pane_id = pane_id;
                     cx.notify();
                 }))
+                .into_any_element()
         }
         PaneNode::Split {
             axis,
@@ -204,6 +205,7 @@ fn render_pane_node(
             container
                 .child(render_pane_node(first, focused_pane_id, cx))
                 .child(render_pane_node(second, focused_pane_id, cx))
+                .into_any_element()
         }
     }
 }
