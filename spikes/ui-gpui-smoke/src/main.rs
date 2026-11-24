@@ -379,7 +379,10 @@ mod tests {
         window.simulate_click(point(px(275.0), px(16.0)), MouseButton::Left);
         window.read(|workspace, _| {
             assert_eq!(workspace.root.leaf_count(), 2);
-            assert_eq!(workspace.panes()[0].session_id, workspace.panes()[1].session_id);
+            assert_eq!(
+                workspace.panes()[0].session_id,
+                workspace.panes()[1].session_id
+            );
         });
 
         window.draw();
