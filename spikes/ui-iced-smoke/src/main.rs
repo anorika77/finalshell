@@ -132,7 +132,11 @@ fn visible_file_range(
     }
 
     let row_height = row_height.max(1.0);
-    let first_visible = (offset.max(0.0) / row_height).floor() as usize;
+    let viewport_height = viewport_height.max(0.0);
+    let content_height = total as f32 * row_height;
+    let max_offset = (content_height - viewport_height).max(0.0);
+    let clamped_offset = offset.max(0.0).min(max_offset);
+    let first_visible = (clamped_offset / row_height).floor() as usize;
     let visible_count = (viewport_height.max(row_height) / row_height).ceil() as usize;
     let start = first_visible.saturating_sub(overscan);
     let end = first_visible
