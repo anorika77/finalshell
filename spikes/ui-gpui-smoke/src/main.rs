@@ -14,10 +14,22 @@ impl Default for WorkspacePrototype {
     fn default() -> Self {
         Self {
             panes: vec![
-                PaneIdentity { pane_id: 1, session_id: 101 },
-                PaneIdentity { pane_id: 2, session_id: 102 },
-                PaneIdentity { pane_id: 3, session_id: 103 },
-                PaneIdentity { pane_id: 4, session_id: 104 },
+                PaneIdentity {
+                    pane_id: 1,
+                    session_id: 101,
+                },
+                PaneIdentity {
+                    pane_id: 2,
+                    session_id: 102,
+                },
+                PaneIdentity {
+                    pane_id: 3,
+                    session_id: 103,
+                },
+                PaneIdentity {
+                    pane_id: 4,
+                    session_id: 104,
+                },
             ],
         }
     }
