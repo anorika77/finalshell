@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use gpui::{AnyElement, App, Context, QuitMode, Window, WindowOptions, div, prelude::*, px, size};
+use gpui::{AnyElement, App, Context, QuitMode, Window, WindowOptions, div, prelude::*, px};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SplitAxis {
@@ -229,13 +229,13 @@ impl Render for WorkspacePrototype {
                     .flex()
                     .child(
                         div()
-                            .size(size(px(220.0), px(32.0)))
+                            .w(px(220.0)).h(px(32.0))
                             .child("FinalShell — GPUI CE prototype"),
                     )
                     .child(
                         div()
                             .id("split-horizontal")
-                            .size(size(px(110.0), px(32.0)))
+                            .w(px(110.0)).h(px(32.0))
                             .child("  [Split H]  ")
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 this.split_focused(SplitAxis::Horizontal);
@@ -245,7 +245,7 @@ impl Render for WorkspacePrototype {
                     .child(
                         div()
                             .id("split-vertical")
-                            .size(size(px(110.0), px(32.0)))
+                            .w(px(110.0)).h(px(32.0))
                             .child("[Split V]  ")
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 this.split_focused(SplitAxis::Vertical);
@@ -255,7 +255,7 @@ impl Render for WorkspacePrototype {
                     .child(
                         div()
                             .id("close-pane")
-                            .size(size(px(110.0), px(32.0)))
+                            .w(px(110.0)).h(px(32.0))
                             .child("[Close focused]")
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 if this.close_focused() {
