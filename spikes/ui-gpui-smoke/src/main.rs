@@ -399,6 +399,24 @@ mod tests {
     }
 
     #[test]
+    fn headless_ui_monitor_tabs_change_the_rendered_panel() {
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| WorkspacePrototype::default());
+
+        window.draw();
+        window.simulate_click(point(px(660.0), px(60.0)), MouseButton::Left);
+        window.read(|workspace, _| {
+            assert_eq!(workspace.monitor_tab, MonitorTab::Network);
+        });
+
+        window.draw();
+        window.simulate_click(point(px(720.0), px(60.0)), MouseButton::Left);
+        window.read(|workspace, _| {
+            assert_eq!(workspace.monitor_tab, MonitorTab::Processes);
+        });
+    }
+
+    #[test]
     fn splitting_creates_a_new_pane_view_for_the_same_session() {
         let mut app = WorkspacePrototype::default();
 
