@@ -7,7 +7,7 @@
 
 ## 1. 本轮结论摘要
 
-**终端引擎：把 libghostty-vt 1.0.x 作为首选验证对象，不再把旧版 Rust binding 的不稳定状态当作整个项目的否决理由。** Ghostty 在 2026-11-06 发布 1.0.0，明确承诺 1.x C ABI 稳定；1.0.1 于 2026-11-11 发布，包含 Windows x86_64/ARM64 预构建包。但 Rust wrapper 与 C ABI 是两个不同稳定层：目前能找到的 `ghostty-vt` 0.9.0+ghostty-vt.1.0.1 是第三方维护的 Rust wrapper/fork，不能把它等同于 Ghostty 官方稳定 Rust API。
+**终端引擎：把 libghostty-vt 1.0.1 作为首选验证对象，但暂不承诺五平台运行支持。** 官方 C ABI 从 1.0 起稳定；1.0.1 Rust crate 由第三方维护，是基于旧 Rust binding 的 fork，且 docs.rs 明确写明当前主要由 gpui-cn 使用、macOS 是该版本唯一声明支持的 runtime。其余目标即使能够构建，也不代表终端行为已受支持。
 
 **UI：先把 GPUI、Iced、Tauri 2 放入短名单；egui 作为轻量对照组。** 暂不定框架。GPUI 的复杂编辑器类交互与自定义绘制值得优先验证；Iced 有清晰的消息驱动模型和多窗口能力；Tauri 2 + xterm.js 是成熟终端 UI 的现实基准，但引入 Web 前端；egui 容易做出可运行原型，但要验证大型信息密集型桌面应用的交互和视觉上限。
 
@@ -21,8 +21,8 @@
 - 1.0.0 于 2026-11-06 发布，C ABI 从 1.0 起稳定；1.x 次版本只增加 API，不移除/重排既有 ABI。
 - 1.0.1 于 2026-11-11 发布，包含 Windows x86_64 和 ARM64 预构建包。
 - 支持 Linux、macOS、Windows 等平台；官方说明 Linux 没有发布预编译包，需要源码构建。
-- 官方构建需要 Zig 0.17；Linux x86_64/ARM64 的 Rust sys crate 构建路径需要验证 Zig 和依赖缓存。
-- Windows 官方预构建包使用 GNU ABI；MSVC 需要走 DLL/import library 或专门的 MSVC 构建配置，不能默认认为静态库可由 MSVC link.exe 直接链接。
+- Rust sys crate 在 Linux 等无预构建库的目标上通过 Zig 从 pinned source/deps tarball 静态构建；要求 Zig 0.17.x。Linux x86_64/ARM64 必须验证构建耗时、内存和缓存。
+- Windows 的预构建静态库是 GNU ABI；MSVC 默认应源码构建，或显式使用预构建库并通过 lld 链接（不能使用默认 link.exe）。这不是 DLL 部署问题，而是 ABI/COFF 链接器兼容问题。
 
 核心 API/职责：
 - `GhosttyTerminal`：接收 VT 字节流并维护屏幕、滚动历史、光标、样式和模式。
@@ -35,9 +35,9 @@
 
 按优先级验证：
 
-1. **候选 A：`ghostty-vt` + `ghostty-vt-sys` 0.9.0+ghostty-vt.1.0.1。** 它提供 Rust 安全封装，并将底层绑定到 Ghostty 1.0.1；构建脚本在部分平台下载预构建库，其余平台用 Zig 从官方 source tarball 构建。需要审查 wrapper 源码、版本锁、许可证、构建脚本与 Windows MSVC 路径。
+1. **候选 A：`ghostty-vt` + `ghostty-vt-sys` 0.9.0+ghostty-vt.1.0.1。** 它提供 Rust 封装，底层绑定 Ghostty 1.0.1；crate 文档说明该 fork 主要由 gpui-cn 使用，macOS 是当前唯一声明支持的 runtime。macOS 下载预构建库；Linux 等目标通过 Zig 源码构建；Windows MSVC 有特殊 lld/源码构建路径。将其视为 spike 依赖，不视为已验证的产品依赖。
 2. **候选 B：直接绑定官方 C ABI。** 若 Rust wrapper 的线程/生命周期抽象不适合本项目，可用 bindgen 或手写最小 FFI 封装。ABI 稳定降低了绑定维护风险，但不免除指针、回调、allocator、对象销毁和线程安全审计。
-3. 不把旧版 `libghostty-vt 0.2.2` 当作最终锁定依赖。它的文档明确标注 API 不稳定；其中类型 `!Send` / `!Sync` 的限制是合理的保守约束，但应重新审查 1.0.x wrapper，而不是沿用旧结论。
+3. 不把旧版 `libghostty-vt 0.2.2` 当作最终锁定依赖。当前 1.0.1 wrapper 仍明确标注所有 handle 为 `!Send` / `!Sync`，并要求在拥有线程驱动。该约束不是旧版本遗留，而是当前封装的实际线程契约。
 
 ### 2.3 线程模型
 
@@ -68,8 +68,8 @@
 
 | 候选 | 优势 | 已知风险/代价 | 在本项目中的定位 |
 |---|---|---|---|
-| GPUI | Rust 原生；为复杂编辑器/工作区设计；自绘与高性能交互；Windows/macOS/Linux 平台后端 | pre-1.0、快速演进；API/内部接口变动；系统托盘/原生菜单/辅助功能要单独验证；Linux X11/Wayland 双后端依赖 | 首选技术 spike |
-| Iced 0.14 | Rust 原生；消息驱动架构；多窗口；wgpu/tiny-skia renderer；IME 已有支持 | 项目仍标注 experimental；复杂拖拽分屏、树/表格、富文本编辑器需自建/验证；原生托盘需额外组件 | 第二候选，作为稳定架构模型对照 |
+| GPUI | Rust 原生；为复杂编辑器/工作区设计；自绘与高性能交互；文档列出 macOS Metal、Linux X11/Wayland、Windows Win32/DirectWrite 后端 | pre-1.0、快速演进；API/内部接口变动；系统托盘/原生菜单/辅助功能要单独验证；Linux X11/Wayland 双后端依赖 | 首选技术 spike |
+| Iced 0.14 | Rust 原生；消息驱动架构；多窗口；wgpu/tiny-skia renderer；0.14 发布说明列出输入法支持、table/grid、PaneGrid 和端到端测试 | 复杂拖拽分屏、树/表格、富文本编辑器仍需原型验证；原生托盘需额外组件；必须验证实际五平台后端组合 | 第二候选，作为消息驱动架构对照 |
 | Tauri 2 + xterm.js | Web UI 组件生态成熟；xterm.js 的终端输入/渲染/选择/搜索生态强；Rust 后端可承载 SSH/配置；跨平台打包成熟 | UI 不再是纯 Rust；系统 WebView 差异；WebView 与 Rust 的高频终端帧/输入桥接需测；前端依赖链和安全边界更复杂 | 终端体验对照组/保底路线 |
 | egui 0.37 | Rust 原生、原型速度快；多视口、IME/剪贴板/AccessKit 进展；便于自定义绘制 | immediate-mode 与复杂桌面信息架构的状态组织成本；树/表格/编辑器细节可能要大量自建；视觉和原生感需实测 | 低成本对照，不作为默认首选 |
 
@@ -130,6 +130,8 @@
 ## 7. 官方资料与调研依据
 
 - libghostty-vt 主页：https://lib.ghostty.org/vt/index.html
+- ghostty-vt 0.9.0+ghostty-vt.1.0.1 Rust wrapper：https://docs.rs/ghostty-vt/latest/ghostty_vt/
+- ghostty-vt-sys 构建矩阵与 MSVC 说明：https://docs.rs/crate/ghostty-vt-sys/latest
 - ABI 稳定性：https://lib.ghostty.org/vt/stability.html
 - 1.0.1 发布说明：https://lib.ghostty.org/vt/release-notes.html
 - 安装与平台构建：https://lib.ghostty.org/vt/installing.html
@@ -138,6 +140,7 @@
 - Rust wrapper：https://docs.rs/ghostty-vt/latest/ghostty_vt/
 - Rust sys crate：https://docs.rs/ghostty-vt-sys/latest/ghostty_vt_sys/
 - GPUI README：https://github.com/zed-industries/zed/tree/main/crates/gpui
+- Iced 0.14 release notes（IME、table/grid、PaneGrid 等）：https://github.com/iced-rs/iced/releases/tag/0.14.0
 - Iced：https://github.com/iced-rs/iced
 - Iced FAQ / IME：https://book.iced.rs/faq
 - egui changelog：https://github.com/emilk/egui/blob/main/crates/egui-winit/CHANGELOG.md
