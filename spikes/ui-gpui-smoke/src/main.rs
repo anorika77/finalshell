@@ -1,4 +1,4 @@
-use gpui::{App, Context, QuitMode, Window, WindowOptions, div, prelude::*};
+use gpui::{App, Context, QuitMode, Window, WindowOptions, div, prelude::*, px};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PaneIdentity {
