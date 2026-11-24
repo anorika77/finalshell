@@ -9,6 +9,7 @@ fn main() -> iced::Result {
         WorkspacePrototype::view,
     )
     .title("FinalShell — UI Workspace Prototype")
+    .subscription(WorkspacePrototype::subscription)
     .run()
 }
 
@@ -71,6 +72,7 @@ enum Message {
     Dragged(pane_grid::DragEvent),
     Resized(pane_grid::ResizeEvent),
     Close(pane_grid::Pane),
+    CloseFocused,
     ConnectionFilterChanged(String),
     ConnectionListScrolled { offset: f32, viewport_height: f32 },
     SelectConnection(u32),
@@ -154,6 +156,40 @@ fn visible_file_range(
     start.min(total)..end.max(start.min(total))
 }
 
+fn shortcut_message(
+    key: &iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+) -> Option<Message> {
+    use iced::keyboard::Key;
+
+    if !modifiers.command() {
+        return None;
+    }
+
+    match key {
+        Key::Character(character) if modifiers.shift() => {
+            if character.eq_ignore_ascii_case("h") {
+                Some(Message::Split(pane_grid::Axis::Horizontal))
+            } else if character.eq_ignore_ascii_case("v") {
+                Some(Message::Split(pane_grid::Axis::Vertical))
+            } else if character.eq_ignore_ascii_case("w") {
+                Some(Message::CloseFocused)
+            } else {
+                None
+            }
+        }
+        Key::Character(character) if modifiers.alt() => {
+            match character.as_str() {
+                "1" => Some(Message::SelectMonitor(MonitorTab::Overview)),
+                "2" => Some(Message::SelectMonitor(MonitorTab::Network)),
+                "3" => Some(Message::SelectMonitor(MonitorTab::Processes)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn connection_matches(node: &ConnectionNode, filter: &str) -> bool {
     let needle = filter.trim().to_lowercase();
     needle.is_empty()
@@ -172,6 +208,24 @@ fn demo_connections() -> Vec<ConnectionNode> {
 }
 
 impl WorkspacePrototype {
+    fn subscription(&self) -> iced::Subscription<Message> {
+        use iced::keyboard;
+
+        keyboard::listen().filter_map(|event| {
+            let keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                repeat: false,
+                ..
+            } = event
+            else {
+                return None;
+            };
+
+            shortcut_message(&key, modifiers)
+        })
+    }
+
     fn update(&mut self, message: Message) {
         match message {
             Message::Split(axis) => {
@@ -195,11 +249,10 @@ impl WorkspacePrototype {
             Message::Resized(pane_grid::ResizeEvent { split, ratio }) => {
                 self.panes.resize(split, ratio);
             }
-            Message::Close(pane) => {
-                if self.panes.len() > 1 {
-                    if let Some((_closed, sibling)) = self.panes.close(pane) {
-                        self.focused = Some(sibling);
-                    }
+            Message::Close(pane) => self.close_pane(pane),
+            Message::CloseFocused => {
+                if let Some(pane) = self.focused {
+                    self.close_pane(pane);
                 }
             }
             Message::ConnectionFilterChanged(value) => self.connection_filter = value,
@@ -276,6 +329,14 @@ impl WorkspacePrototype {
             .spacing(8)
             .padding(10)
             .into()
+    }
+
+    fn close_pane(&mut self, pane: pane_grid::Pane) {
+        if self.panes.len() > 1 {
+            if let Some((_closed, sibling)) = self.panes.close(pane) {
+                self.focused = Some(sibling);
+            }
+        }
     }
 
     fn connection_sidebar(&self) -> Element<'_, Message> {
@@ -512,6 +573,37 @@ fn terminal_fixture(session_id: u64) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyboard_shortcuts_are_platform_command_key_aware() {
+        use iced::keyboard::{Key, Modifiers};
+
+        let split = shortcut_message(
+            &Key::Character("h".into()),
+            Modifiers::COMMAND.union(Modifiers::SHIFT),
+        );
+        assert!(matches!(split, Some(Message::Split(pane_grid::Axis::Horizontal))));
+
+        let close = shortcut_message(
+            &Key::Character("w".into()),
+            Modifiers::COMMAND.union(Modifiers::SHIFT),
+        );
+        assert!(matches!(close, Some(Message::CloseFocused)));
+
+        let monitor = shortcut_message(
+            &Key::Character("2".into()),
+            Modifiers::COMMAND.union(Modifiers::ALT),
+        );
+        assert!(matches!(monitor, Some(Message::SelectMonitor(MonitorTab::Network))));
+    }
+
+    #[test]
+    fn shortcuts_without_platform_command_modifier_are_ignored() {
+        use iced::keyboard::{Key, Modifiers};
+
+        assert!(shortcut_message(&Key::Character("h".into()), Modifiers::SHIFT).is_none());
+        assert!(shortcut_message(&Key::Character("x".into()), Modifiers::COMMAND).is_none());
+    }
 
     #[test]
     fn splitting_creates_a_new_pane_without_changing_existing_session_identity() {
