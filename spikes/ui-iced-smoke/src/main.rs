@@ -1,6 +1,8 @@
 use iced::widget::pane_grid::{self, PaneGrid};
-use iced::widget::{Column, button, column, container, row, scrollable, text, text_input};
-use iced::{Element, Fill};
+use iced::widget::{
+    Column, button, column, container, row, scrollable, space, text, text_input,
+};
+use iced::{Element, Fill, Length};
 
 fn main() -> iced::Result {
     iced::application(
@@ -18,6 +20,17 @@ struct ConnectionNode {
     name: String,
     group: String,
 }
+
+#[derive(Debug, Clone)]
+struct FileEntry {
+    name: String,
+    size: String,
+    kind: &'static str,
+}
+
+const FILE_ROW_HEIGHT: f32 = 24.0;
+const FILE_LIST_HEIGHT: f32 = 156.0;
+const FILE_LIST_OVERSCAN: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MonitorTab {
@@ -37,6 +50,10 @@ struct WorkspacePrototype {
     monitor_tab: MonitorTab,
     quick_command: String,
     last_mock_command: Option<String>,
+    files: Vec<FileEntry>,
+    file_scroll_offset: f32,
+    file_viewport_height: f32,
+    selected_file: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -57,6 +74,8 @@ enum Message {
     SelectMonitor(MonitorTab),
     QuickCommandChanged(String),
     SubmitQuickCommand,
+    FileListScrolled { offset: f32, viewport_height: f32 },
+    SelectFile(usize),
 }
 
 impl Default for WorkspacePrototype {
@@ -77,8 +96,52 @@ impl Default for WorkspacePrototype {
             monitor_tab: MonitorTab::Overview,
             quick_command: String::new(),
             last_mock_command: None,
+            files: demo_files(),
+            file_scroll_offset: 0.0,
+            file_viewport_height: FILE_LIST_HEIGHT,
+            selected_file: None,
         }
     }
+}
+
+fn demo_files() -> Vec<FileEntry> {
+    (0..10_000)
+        .map(|index| {
+            let extension = match index % 4 {
+                0 => "log",
+                1 => "conf",
+                2 => "tar.gz",
+                _ => "txt",
+            };
+            FileEntry {
+                name: format!("remote-file-{index:05}.{extension}"),
+                size: format!("{} KB", (index * 37 % 8192) + 1),
+                kind: if index % 4 == 2 { "archive" } else { "file" },
+            }
+        })
+        .collect()
+}
+
+fn visible_file_range(
+    total: usize,
+    offset: f32,
+    viewport_height: f32,
+    row_height: f32,
+    overscan: usize,
+) -> std::ops::Range<usize> {
+    if total == 0 {
+        return 0..0;
+    }
+
+    let first_visible = (offset.max(0.0) / row_height).floor() as usize;
+    let visible_count = (viewport_height.max(row_height) / row_height).ceil() as usize;
+    let start = first_visible.saturating_sub(overscan);
+    let end = first_visible
+        .saturating_add(visible_count)
+        .saturating_add(overscan)
+        .min(total);
+
+    start.min(total)..end.max(start.min(total))
 }
 
 fn demo_connections() -> Vec<ConnectionNode> {
@@ -133,6 +196,14 @@ impl WorkspacePrototype {
                     self.quick_command.clear();
                 }
             }
+            Message::FileListScrolled {
+                offset,
+                viewport_height,
+            } => {
+                self.file_scroll_offset = offset;
+                self.file_viewport_height = viewport_height;
+            }
+            Message::SelectFile(index) => self.selected_file = Some(index),
         }
     }
 
@@ -158,6 +229,8 @@ impl WorkspacePrototype {
         .spacing(8)
         .height(Fill);
 
+        let file_panel = self.file_panel();
+
         let quick_bar = row![
             text("Quick command"),
             text_input("Mock only — no SSH command is sent", &self.quick_command)
@@ -175,7 +248,7 @@ impl WorkspacePrototype {
         })
         .size(12);
 
-        column![toolbar, main_area, quick_bar, status]
+        column![toolbar, main_area, file_panel, quick_bar, status]
             .spacing(8)
             .padding(10)
             .into()
@@ -257,6 +330,72 @@ impl WorkspacePrototype {
         .on_drag(Message::Dragged)
         .on_resize(10, Message::Resized)
         .into()
+    }
+
+    fn file_panel(&self) -> Element<'_, Message> {
+        let range = visible_file_range(
+            self.files.len(),
+            self.file_scroll_offset,
+            self.file_viewport_height,
+            FILE_ROW_HEIGHT,
+            FILE_LIST_OVERSCAN,
+        );
+
+        let mut visible_rows: Column<'_, Message> = column![];
+        for index in range.clone() {
+            let file = &self.files[index];
+            let selected = self.selected_file == Some(index);
+            let marker = if selected { "●" } else { " " };
+            visible_rows = visible_rows.push(
+                button(
+                    row![
+                        text(format!("{marker} {}", file.name)).size(12).width(Fill),
+                        text(&file.size).size(11),
+                        text(file.kind).size(11),
+                    ]
+                    .spacing(12),
+                )
+                .width(Fill)
+                .on_press(Message::SelectFile(index)),
+            );
+        }
+
+        let top_padding = range.start as f32 * FILE_ROW_HEIGHT;
+        let bottom_padding = self.files.len().saturating_sub(range.end) as f32 * FILE_ROW_HEIGHT;
+        let list_content = column![
+            space().height(Length::Fixed(top_padding)),
+            visible_rows,
+            space().height(Length::Fixed(bottom_padding)),
+        ];
+
+        let list = scrollable(list_content)
+            .height(Length::Fixed(FILE_LIST_HEIGHT))
+            .on_scroll(|viewport| {
+                let offset = viewport.absolute_offset().y;
+                let viewport_height = viewport.bounds().height;
+                Message::FileListScrolled {
+                    offset,
+                    viewport_height,
+                }
+            });
+
+        let header = row![
+            text("Remote files (10,000 fixture rows)").size(14),
+            text(format!(
+                "Rendering {} rows · {}–{} / {}",
+                range.len(),
+                range.start.saturating_add(1),
+                range.end,
+                self.files.len()
+            ))
+            .size(11),
+        ]
+        .spacing(12);
+
+        container(column![header, list].spacing(6))
+            .padding(8)
+            .width(Fill)
+            .into()
     }
 
     fn monitor_panel(&self) -> Element<'_, Message> {
@@ -377,6 +516,33 @@ mod tests {
                 .iter()
                 .any(|node| node.name == "server-0999")
         );
+    }
+
+    #[test]
+    fn file_fixture_has_ten_thousand_rows() {
+        let app = WorkspacePrototype::default();
+        assert_eq!(app.files.len(), 10_000);
+        assert_eq!(app.files[9_999].name, "remote-file-09999.txt");
+    }
+
+    #[test]
+    fn file_virtualization_materializes_only_a_viewport_sized_window() {
+        let range = visible_file_range(10_000, 24_000.0, 156.0, FILE_ROW_HEIGHT, FILE_LIST_OVERSCAN);
+        assert_eq!(range.start, 997);
+        assert!(range.len() <= 20);
+        assert!(range.contains(&1_000));
+    }
+
+    #[test]
+    fn file_virtualization_clamps_at_the_end_of_the_dataset() {
+        let range = visible_file_range(10_000, 999_999.0, 156.0, FILE_ROW_HEIGHT, FILE_LIST_OVERSCAN);
+        assert_eq!(range.end, 10_000);
+        assert!(range.start < range.end);
+    }
+
+    #[test]
+    fn empty_file_virtualization_range_is_empty() {
+        assert_eq!(visible_file_range(0, 0.0, FILE_LIST_HEIGHT, FILE_ROW_HEIGHT, 3), 0..0);
     }
 
     #[test]
