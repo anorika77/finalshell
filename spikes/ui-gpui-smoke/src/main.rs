@@ -229,13 +229,15 @@ impl Render for WorkspacePrototype {
                     .flex()
                     .child(
                         div()
-                            .w(px(220.0)).h(px(32.0))
+                            .w(px(220.0))
+                            .h(px(32.0))
                             .child("FinalShell — GPUI CE prototype"),
                     )
                     .child(
                         div()
                             .id("split-horizontal")
-                            .w(px(110.0)).h(px(32.0))
+                            .w(px(110.0))
+                            .h(px(32.0))
                             .child("  [Split H]  ")
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 this.split_focused(SplitAxis::Horizontal);
@@ -245,7 +247,8 @@ impl Render for WorkspacePrototype {
                     .child(
                         div()
                             .id("split-vertical")
-                            .w(px(110.0)).h(px(32.0))
+                            .w(px(110.0))
+                            .h(px(32.0))
                             .child("[Split V]  ")
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 this.split_focused(SplitAxis::Vertical);
@@ -255,7 +258,8 @@ impl Render for WorkspacePrototype {
                     .child(
                         div()
                             .id("close-pane")
-                            .w(px(110.0)).h(px(32.0))
+                            .w(px(110.0))
+                            .h(px(32.0))
                             .child("[Close focused]")
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 if this.close_focused() {
