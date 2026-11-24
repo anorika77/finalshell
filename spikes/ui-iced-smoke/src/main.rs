@@ -133,6 +133,7 @@ fn visible_file_range(
         return 0..0;
     }
 
+    let row_height = row_height.max(1.0);
     let first_visible = (offset.max(0.0) / row_height).floor() as usize;
     let visible_count = (viewport_height.max(row_height) / row_height).ceil() as usize;
     let start = first_visible.saturating_sub(overscan);
@@ -356,6 +357,8 @@ impl WorkspacePrototype {
                     .spacing(12),
                 )
                 .width(Fill)
+                .height(Length::Fixed(FILE_ROW_HEIGHT))
+                .padding(2)
                 .on_press(Message::SelectFile(index)),
             );
         }
