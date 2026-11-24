@@ -3,6 +3,13 @@ use std::collections::BTreeSet;
 use gpui::{AnyElement, App, Context, QuitMode, Window, WindowOptions, div, prelude::*, px};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MonitorTab {
+    Overview,
+    Network,
+    Processes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SplitAxis {
     Horizontal,
     Vertical,
@@ -97,6 +104,7 @@ impl PaneNode {
 
 struct WorkspacePrototype {
     root: PaneNode,
+    monitor_tab: MonitorTab,
     focused_pane_id: u64,
     next_pane_id: u64,
     sessions: BTreeSet<u64>,
@@ -111,12 +119,17 @@ impl Default for WorkspacePrototype {
             }),
             focused_pane_id: 1,
             next_pane_id: 2,
+            monitor_tab: MonitorTab::Overview,
             sessions: BTreeSet::from([101]),
         }
     }
 }
 
 impl WorkspacePrototype {
+    fn select_monitor(&mut self, tab: MonitorTab) {
+        self.monitor_tab = tab;
+    }
+
     fn panes(&self) -> Vec<PaneIdentity> {
         let mut panes = Vec::with_capacity(self.root.leaf_count());
         self.root.collect_panes(&mut panes);
@@ -295,7 +308,42 @@ impl Render for WorkspacePrototype {
                             .flex_col()
                             .w(px(220.0))
                             .child("Monitor")
-                            .child("Overview  |  Network  |  Processes"),
+                            .child(
+                                div()
+                                    .flex()
+                                    .child(
+                                        div()
+                                            .id("monitor-overview")
+                                            .child(if self.monitor_tab == MonitorTab::Overview { "[Overview]" } else { "Overview" })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.select_monitor(MonitorTab::Overview);
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("monitor-network")
+                                            .child(if self.monitor_tab == MonitorTab::Network { "[Network]" } else { "Network" })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.select_monitor(MonitorTab::Network);
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("monitor-processes")
+                                            .child(if self.monitor_tab == MonitorTab::Processes { "[Processes]" } else { "Processes" })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.select_monitor(MonitorTab::Processes);
+                                                cx.notify();
+                                            })),
+                                    ),
+                            )
+                            .child(match self.monitor_tab {
+                                MonitorTab::Overview => "CPU 12.4% · Memory 4.2 / 16 GB · Uptime 12 days",
+                                MonitorTab::Network => "RX 1.8 MB/s · TX 420 KB/s · Interface eth0",
+                                MonitorTab::Processes => "1024 sshd · 1180 bash · 2201 nginx",
+                            }),
                     ),
             )
             .child(div().child("Quick command — local mock only; no SSH"))
@@ -323,6 +371,18 @@ fn main() {
 mod tests {
     use super::*;
     use gpui::{MouseButton, TestApp, point};
+
+    #[test]
+    fn monitor_tabs_select_the_matching_panel_content() {
+        let mut app = WorkspacePrototype::default();
+        assert_eq!(app.monitor_tab, MonitorTab::Overview);
+
+        app.select_monitor(MonitorTab::Network);
+        assert_eq!(app.monitor_tab, MonitorTab::Network);
+
+        app.select_monitor(MonitorTab::Processes);
+        assert_eq!(app.monitor_tab, MonitorTab::Processes);
+    }
 
     #[test]
     fn splitting_creates_a_new_pane_view_for_the_same_session() {
