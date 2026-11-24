@@ -66,14 +66,15 @@ impl Render for WorkspacePrototype {
                             .flex_1()
                             .child("Terminal workspace")
                             .child(
-                                div().flex().flex_1().children(
-                                    self.panes.iter().map(|pane| {
+                                div()
+                                    .flex()
+                                    .flex_1()
+                                    .children(self.panes.iter().map(|pane| {
                                         div().child(format!(
                                             "Pane {} / Session {}",
                                             pane.pane_id, pane.session_id
                                         ))
-                                    }),
-                                ),
+                                    })),
                             )
                             .child("10,000 mock files"),
                     )
