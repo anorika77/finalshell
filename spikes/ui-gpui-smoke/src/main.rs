@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use gpui::{AnyElement, App, Context, QuitMode, Window, WindowOptions, div, prelude::*, px};
+use gpui::{AnyElement, App, Context, QuitMode, Window, WindowOptions, div, prelude::*, px, size};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SplitAxis {
@@ -227,10 +227,15 @@ impl Render for WorkspacePrototype {
             .child(
                 div()
                     .flex()
-                    .child("FinalShell — GPUI CE prototype")
+                    .child(
+                        div()
+                            .size(size(px(220.0), px(32.0)))
+                            .child("FinalShell — GPUI CE prototype"),
+                    )
                     .child(
                         div()
                             .id("split-horizontal")
+                            .size(size(px(110.0), px(32.0)))
                             .child("  [Split H]  ")
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 this.split_focused(SplitAxis::Horizontal);
@@ -240,6 +245,7 @@ impl Render for WorkspacePrototype {
                     .child(
                         div()
                             .id("split-vertical")
+                            .size(size(px(110.0), px(32.0)))
                             .child("[Split V]  ")
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 this.split_focused(SplitAxis::Vertical);
@@ -249,6 +255,7 @@ impl Render for WorkspacePrototype {
                     .child(
                         div()
                             .id("close-pane")
+                            .size(size(px(110.0), px(32.0)))
                             .child("[Close focused]")
                             .on_click(cx.listener(|this, _event, _window, cx| {
                                 if this.close_focused() {
@@ -311,6 +318,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::{MouseButton, TestApp, point};
 
     #[test]
     fn splitting_creates_a_new_pane_view_for_the_same_session() {
@@ -360,6 +368,31 @@ mod tests {
         assert!(app.close_focused());
         assert_eq!(app.root.leaf_count(), 3);
         assert_eq!(app.panes().len(), 3);
+    }
+
+    #[test]
+    fn headless_ui_split_and_close_buttons_change_the_rendered_workspace() {
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| WorkspacePrototype::default());
+
+        window.draw();
+        window.simulate_click(point(px(275.0), px(16.0)), MouseButton::Left);
+        window.read(|workspace, _| {
+            assert_eq!(workspace.root.leaf_count(), 2);
+            assert_eq!(workspace.panes()[0].session_id, workspace.panes()[1].session_id);
+        });
+
+        window.draw();
+        window.simulate_click(point(px(385.0), px(16.0)), MouseButton::Left);
+        window.read(|workspace, _| assert_eq!(workspace.root.leaf_count(), 3));
+
+        window.draw();
+        window.simulate_click(point(px(495.0), px(16.0)), MouseButton::Left);
+        window.read(|workspace, _| {
+            assert_eq!(workspace.root.leaf_count(), 2);
+            assert_eq!(workspace.sessions.len(), 1);
+            assert!(workspace.session_is_active(101));
+        });
     }
 
     #[test]
