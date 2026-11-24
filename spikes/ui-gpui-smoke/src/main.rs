@@ -314,7 +314,11 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("monitor-overview")
-                                            .child(if self.monitor_tab == MonitorTab::Overview { "[Overview]" } else { "Overview" })
+                                            .child(if self.monitor_tab == MonitorTab::Overview {
+                                                "[Overview]"
+                                            } else {
+                                                "Overview"
+                                            })
                                             .on_click(cx.listener(|this, _event, _window, cx| {
                                                 this.select_monitor(MonitorTab::Overview);
                                                 cx.notify();
@@ -323,7 +327,11 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("monitor-network")
-                                            .child(if self.monitor_tab == MonitorTab::Network { "[Network]" } else { "Network" })
+                                            .child(if self.monitor_tab == MonitorTab::Network {
+                                                "[Network]"
+                                            } else {
+                                                "Network"
+                                            })
                                             .on_click(cx.listener(|this, _event, _window, cx| {
                                                 this.select_monitor(MonitorTab::Network);
                                                 cx.notify();
@@ -332,7 +340,11 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("monitor-processes")
-                                            .child(if self.monitor_tab == MonitorTab::Processes { "[Processes]" } else { "Processes" })
+                                            .child(if self.monitor_tab == MonitorTab::Processes {
+                                                "[Processes]"
+                                            } else {
+                                                "Processes"
+                                            })
                                             .on_click(cx.listener(|this, _event, _window, cx| {
                                                 this.select_monitor(MonitorTab::Processes);
                                                 cx.notify();
@@ -340,7 +352,9 @@ impl Render for WorkspacePrototype {
                                     ),
                             )
                             .child(match self.monitor_tab {
-                                MonitorTab::Overview => "CPU 12.4% · Memory 4.2 / 16 GB · Uptime 12 days",
+                                MonitorTab::Overview => {
+                                    "CPU 12.4% · Memory 4.2 / 16 GB · Uptime 12 days"
+                                },
                                 MonitorTab::Network => "RX 1.8 MB/s · TX 420 KB/s · Interface eth0",
                                 MonitorTab::Processes => "1024 sshd · 1180 bash · 2201 nginx",
                             }),
