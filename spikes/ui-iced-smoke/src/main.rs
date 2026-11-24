@@ -582,7 +582,10 @@ mod tests {
             &Key::Character("h".into()),
             Modifiers::COMMAND.union(Modifiers::SHIFT),
         );
-        assert!(matches!(split, Some(Message::Split(pane_grid::Axis::Horizontal))));
+        assert!(matches!(
+            split,
+            Some(Message::Split(pane_grid::Axis::Horizontal))
+        ));
 
         let close = shortcut_message(
             &Key::Character("w".into()),
@@ -594,7 +597,10 @@ mod tests {
             &Key::Character("2".into()),
             Modifiers::COMMAND.union(Modifiers::ALT),
         );
-        assert!(matches!(monitor, Some(Message::SelectMonitor(MonitorTab::Network))));
+        assert!(matches!(
+            monitor,
+            Some(Message::SelectMonitor(MonitorTab::Network))
+        ));
     }
 
     #[test]
