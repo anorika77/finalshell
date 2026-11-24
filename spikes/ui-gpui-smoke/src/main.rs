@@ -136,10 +136,7 @@ impl WorkspacePrototype {
             pane_id: self.next_pane_id,
             session_id: focused.session_id,
         };
-        if self
-            .root
-            .split_leaf(self.focused_pane_id, new_pane, axis)
-        {
+        if self.root.split_leaf(self.focused_pane_id, new_pane, axis) {
             self.next_pane_id += 1;
             self.focused_pane_id = new_pane.pane_id;
         }
@@ -268,11 +265,7 @@ impl Render for WorkspacePrototype {
                             .flex_col()
                             .flex_1()
                             .child("Terminal workspace")
-                            .child(render_pane_node(
-                                &self.root,
-                                self.focused_pane_id,
-                                cx,
-                            ))
+                            .child(render_pane_node(&self.root, self.focused_pane_id, cx))
                             .child("10,000 mock files"),
                     )
                     .child(
