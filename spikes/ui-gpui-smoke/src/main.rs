@@ -403,14 +403,23 @@ mod tests {
         let mut app = TestApp::new();
         let mut window = app.open_window(|_, _| WorkspacePrototype::default());
 
+        let window_width = window.update(|_, window, _| window.bounds().size.width);
+        let monitor_left = window_width - px(220.0);
+
         window.draw();
-        window.simulate_click(point(px(660.0), px(60.0)), MouseButton::Left);
+        window.simulate_click(
+            point(monitor_left + px(85.0), px(60.0)),
+            MouseButton::Left,
+        );
         window.read(|workspace, _| {
             assert_eq!(workspace.monitor_tab, MonitorTab::Network);
         });
 
         window.draw();
-        window.simulate_click(point(px(720.0), px(60.0)), MouseButton::Left);
+        window.simulate_click(
+            point(monitor_left + px(155.0), px(60.0)),
+            MouseButton::Left,
+        );
         window.read(|workspace, _| {
             assert_eq!(workspace.monitor_tab, MonitorTab::Processes);
         });
