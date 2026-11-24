@@ -315,12 +315,12 @@ impl WorkspacePrototype {
             visible_rows,
             space().height(Length::Fixed(bottom_padding)),
         ];
-        let list = scrollable(list_content)
-            .height(Fill)
-            .on_scroll(|viewport| Message::ConnectionListScrolled {
+        let list = scrollable(list_content).height(Fill).on_scroll(|viewport| {
+            Message::ConnectionListScrolled {
                 offset: viewport.absolute_offset().y,
                 viewport_height: viewport.bounds().height,
-            });
+            }
+        });
 
         let header = column![
             text("Connections").size(17),
@@ -618,7 +618,10 @@ mod tests {
             .find(|node| connection_matches(node, &app.connection_filter))
             .expect("filtered host exists");
 
-        assert_eq!(selected.id, app.selected_connection.expect("selection retained"));
+        assert_eq!(
+            selected.id,
+            app.selected_connection.expect("selection retained")
+        );
     }
 
     #[test]
