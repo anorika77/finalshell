@@ -212,6 +212,14 @@ fn render_pane_node(
 
 impl Render for WorkspacePrototype {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let visible_session_count = self
+            .sessions
+            .iter()
+            .filter(|session_id| {
+                self.session_is_active(**session_id) && self.session_has_panes(**session_id)
+            })
+            .count();
+
         div()
             .size_full()
             .flex()
@@ -283,7 +291,7 @@ impl Render for WorkspacePrototype {
             .child(div().child(format!(
                 "{} panes / {} active sessions",
                 self.root.leaf_count(),
-                self.sessions.len()
+                visible_session_count
             )))
     }
 }
