@@ -1,0 +1,10 @@
+[package]
+name = "finallyshell-rs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A cross-platform Rust rewrite of FinalShell"
+repository = "https://github.com/anorika77/finalshell"
+publish = false
+
+[dependencies]

@@ -1,0 +1,82 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS ARM64
+            os: macos-15
+          - name: macOS x86_64
+            os: macos-15-intel
+          - name: Linux x86_64
+            os: ubuntu-24.04
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+          - name: Windows x86_64
+            os: windows-2025
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          matcher: true
+
+      - name: Show toolchain
+        run: |
+          rustc --version
+          cargo --version
+          rustc -vV
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked --all-targets --all-features
+
+      - name: Release build
+        run: cargo build --locked --release
+
+      - name: Select binary
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo "BINARY=target/release/finallyshell-rs.exe" >> "$GITHUB_ENV"
+          else
+            echo "BINARY=target/release/finallyshell-rs" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: finallyshell-rs-${{ matrix.os }}
+          path: ${{ env.BINARY }}
+          if-no-files-found: error
+          retention-days: 14
