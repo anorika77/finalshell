@@ -354,7 +354,7 @@ impl Render for WorkspacePrototype {
                             .child(match self.monitor_tab {
                                 MonitorTab::Overview => {
                                     "CPU 12.4% · Memory 4.2 / 16 GB · Uptime 12 days"
-                                },
+                                }
                                 MonitorTab::Network => "RX 1.8 MB/s · TX 420 KB/s · Interface eth0",
                                 MonitorTab::Processes => "1024 sshd · 1180 bash · 2201 nginx",
                             }),
