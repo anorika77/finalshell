@@ -1,13 +1,15 @@
 use iced::widget::pane_grid::{self, PaneGrid};
-use iced::widget::{
-    button, column, container, row, scrollable, text, text_input, Column,
-};
-use iced::{Element, Fill, Length};
+use iced::widget::{Column, button, column, container, row, scrollable, text, text_input};
+use iced::{Element, Fill};
 
 fn main() -> iced::Result {
-    iced::application(WorkspacePrototype::default, WorkspacePrototype::update, WorkspacePrototype::view)
-        .title("FinalShell — UI Workspace Prototype")
-        .run()
+    iced::application(
+        WorkspacePrototype::default,
+        WorkspacePrototype::update,
+        WorkspacePrototype::view,
+    )
+    .title("FinalShell — UI Workspace Prototype")
+    .run()
 }
 
 #[derive(Debug, Clone)]
@@ -98,9 +100,7 @@ impl WorkspacePrototype {
                         pane_id: self.next_pane_id,
                         session_id: self.next_session_id,
                     };
-                    if let Some((new_pane, _split)) =
-                        self.panes.split(axis, source, new_state)
-                    {
+                    if let Some((new_pane, _split)) = self.panes.split(axis, source, new_state) {
                         self.focused = Some(new_pane);
                         self.next_pane_id += 1;
                         self.next_session_id += 1;
@@ -262,9 +262,15 @@ impl WorkspacePrototype {
     fn monitor_panel(&self) -> Element<'_, Message> {
         let tabs = column![
             text("Monitor").size(17),
-            button("Overview").width(Fill).on_press(Message::SelectMonitor(MonitorTab::Overview)),
-            button("Network").width(Fill).on_press(Message::SelectMonitor(MonitorTab::Network)),
-            button("Processes").width(Fill).on_press(Message::SelectMonitor(MonitorTab::Processes)),
+            button("Overview")
+                .width(Fill)
+                .on_press(Message::SelectMonitor(MonitorTab::Overview)),
+            button("Network")
+                .width(Fill)
+                .on_press(Message::SelectMonitor(MonitorTab::Network)),
+            button("Processes")
+                .width(Fill)
+                .on_press(Message::SelectMonitor(MonitorTab::Processes)),
         ]
         .spacing(6);
 
@@ -366,7 +372,11 @@ mod tests {
     fn connection_fixture_contains_one_thousand_searchable_hosts() {
         let app = WorkspacePrototype::default();
         assert_eq!(app.connections.len(), 1_000);
-        assert!(app.connections.iter().any(|node| node.name == "server-0999"));
+        assert!(
+            app.connections
+                .iter()
+                .any(|node| node.name == "server-0999")
+        );
     }
 
     #[test]
