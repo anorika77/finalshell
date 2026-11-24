@@ -573,6 +573,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn headless_ui_exposes_workspace_regions_and_split_button() {
+        let mut app = WorkspacePrototype::default();
+        let messages = {
+            let mut ui = iced_test::simulator(app.view());
+            assert!(ui.find("Connections").is_ok());
+            assert!(ui.find("Monitor").is_ok());
+            ui.click("Split ↔")
+                .expect("horizontal split button should be interactable");
+            ui.into_messages().collect::<Vec<_>>()
+        };
+
+        assert!(matches!(
+            messages.as_slice(),
+            [Message::Split(pane_grid::Axis::Horizontal)]
+        ));
+
+        for message in messages {
+            app.update(message);
+        }
+
+        assert_eq!(app.panes.len(), 2);
+    }
+
+    #[test]
+    fn headless_ui_monitor_button_emits_the_expected_message() {
+        let mut app = WorkspacePrototype::default();
+        let messages = {
+            let mut ui = iced_test::simulator(app.view());
+            ui.click("Network")
+                .expect("network tab should be interactable");
+            ui.into_messages().collect::<Vec<_>>()
+        };
+
+        assert!(matches!(
+            messages.as_slice(),
+            [Message::SelectMonitor(MonitorTab::Network)]
+        ));
+
+        for message in messages {
+            app.update(message);
+        }
+
+        assert_eq!(app.monitor_tab, MonitorTab::Network);
+    }
+
+    #[test]
     fn keyboard_shortcuts_are_platform_command_key_aware() {
         use iced::keyboard::{Key, Modifiers};
 
