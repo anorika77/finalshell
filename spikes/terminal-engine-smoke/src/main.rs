@@ -1,4 +1,4 @@
-use ghostty_vt::{Event, Terminal, TerminalOptions};
+use ghostty_vt::{Terminal, TerminalOptions};
 
 fn main() {
     let mut terminal = Terminal::new(TerminalOptions {
@@ -16,6 +16,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghostty_vt::Event;
 
     #[test]
     fn parses_vt_stream_and_emits_side_effect_events() {
