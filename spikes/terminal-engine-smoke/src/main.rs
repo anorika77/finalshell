@@ -8,9 +8,7 @@ fn main() {
     })
     .expect("create Ghostty terminal");
 
-    terminal.vt_write(
-        b"FinalShell terminal spike\r\n\x1b[1;32mVT parser online\x1b[0m\r\n",
-    );
+    terminal.vt_write(b"FinalShell terminal spike\r\n\x1b[1;32mVT parser online\x1b[0m\r\n");
 
     println!("libghostty-vt terminal initialized and accepted VT input");
 }
