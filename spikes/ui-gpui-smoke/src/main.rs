@@ -407,19 +407,13 @@ mod tests {
         let monitor_left = window_width - px(220.0);
 
         window.draw();
-        window.simulate_click(
-            point(monitor_left + px(85.0), px(60.0)),
-            MouseButton::Left,
-        );
+        window.simulate_click(point(monitor_left + px(85.0), px(60.0)), MouseButton::Left);
         window.read(|workspace, _| {
             assert_eq!(workspace.monitor_tab, MonitorTab::Network);
         });
 
         window.draw();
-        window.simulate_click(
-            point(monitor_left + px(155.0), px(60.0)),
-            MouseButton::Left,
-        );
+        window.simulate_click(point(monitor_left + px(155.0), px(60.0)), MouseButton::Left);
         window.read(|workspace, _| {
             assert_eq!(workspace.monitor_tab, MonitorTab::Processes);
         });
