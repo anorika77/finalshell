@@ -8,20 +8,20 @@
 
 | 子系统 | 测试文件数 | 主要验收面 |
 |---|---:|---|
-| internal/app | 67 | 用例编排、会话状态、窗口/布局、各功能页和 UI 行为 |
+| internal/app | 64 | 用例编排、会话状态、窗口/布局、各功能页和 UI 行为 |
 | internal/cloudsync | 7 | 加密、三方合并、Gist/WebDAV/S3、冲突与重试 |
 | internal/config | 10 | 配置、迁移、字段往返、历史、快捷命令、同步白名单 |
 | internal/importer | 7 | 各来源解析、编码、异常输入、导入问题 |
-| internal/monitor | 11 | 远端脚本解析、进程/socket、shell cwd、路由追踪 |
+| internal/monitor | 13 | 远端脚本解析、进程/socket、shell cwd、路由追踪 |
 | internal/remotefs | 4 | SFTP、文件操作、传输取消、归档安全、文本编辑 |
 | internal/sshx | 4 | SSH Agent、转发、保活、代理和跳板 |
 | internal/fileicons | 1 | 主题解析、匹配、字体、安装、扫描编辑器扩展 |
 | internal/geo | 2 | 数据下载/回退/取消、查询与缓存 |
 | internal/termenc | 1 | 编码转换、resize 与鼠标报告透传 |
 | internal/icons | 1 | agent 图标资源 |
-| 根目录/工具 | 4 | 渲染平台 workaround、托盘图标、更新配置、natives 重试、release 工具（实际文件数以 tree 为准） |
+| 根目录/工具 | 5 | 渲染平台 workaround、托盘图标、更新配置、natives 重试、release 工具 |
 
-说明：上表按目录归类；根目录/工具项包含 rendering、tray、updates、tools/natives、tools/release 的测试文件。统计汇总应以 Git tree 的实际文件路径为准。
+说明：上表按目录归类；根目录/工具项包含 rendering、tray、updates、tools/natives、tools/release 的测试文件。
 
 ## 2. 按领域的行为验收
 
