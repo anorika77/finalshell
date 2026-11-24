@@ -29,6 +29,8 @@ struct FileEntry {
 const FILE_ROW_HEIGHT: f32 = 24.0;
 const FILE_LIST_HEIGHT: f32 = 156.0;
 const FILE_LIST_OVERSCAN: usize = 3;
+const CONNECTION_ROW_HEIGHT: f32 = 26.0;
+const CONNECTION_LIST_OVERSCAN: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MonitorTab {
@@ -44,6 +46,8 @@ struct WorkspacePrototype {
     focused: Option<pane_grid::Pane>,
     connections: Vec<ConnectionNode>,
     connection_filter: String,
+    connection_scroll_offset: f32,
+    connection_viewport_height: f32,
     selected_connection: Option<u32>,
     monitor_tab: MonitorTab,
     quick_command: String,
@@ -68,6 +72,7 @@ enum Message {
     Resized(pane_grid::ResizeEvent),
     Close(pane_grid::Pane),
     ConnectionFilterChanged(String),
+    ConnectionListScrolled { offset: f32, viewport_height: f32 },
     SelectConnection(u32),
     SelectMonitor(MonitorTab),
     QuickCommandChanged(String),
@@ -90,6 +95,8 @@ impl Default for WorkspacePrototype {
             focused: Some(first),
             connections: demo_connections(),
             connection_filter: String::new(),
+            connection_scroll_offset: 0.0,
+            connection_viewport_height: 260.0,
             selected_connection: None,
             monitor_tab: MonitorTab::Overview,
             quick_command: String::new(),
@@ -147,6 +154,13 @@ fn visible_file_range(
     start.min(total)..end.max(start.min(total))
 }
 
+fn connection_matches(node: &ConnectionNode, filter: &str) -> bool {
+    let needle = filter.trim().to_lowercase();
+    needle.is_empty()
+        || node.name.to_lowercase().contains(&needle)
+        || node.group.to_lowercase().contains(&needle)
+}
+
 fn demo_connections() -> Vec<ConnectionNode> {
     (1..=1_000)
         .map(|id| ConnectionNode {
@@ -189,6 +203,13 @@ impl WorkspacePrototype {
                 }
             }
             Message::ConnectionFilterChanged(value) => self.connection_filter = value,
+            Message::ConnectionListScrolled {
+                offset,
+                viewport_height,
+            } => {
+                self.connection_scroll_offset = offset;
+                self.connection_viewport_height = viewport_height;
+            }
             Message::SelectConnection(id) => self.selected_connection = Some(id),
             Message::SelectMonitor(tab) => self.monitor_tab = tab,
             Message::QuickCommandChanged(value) => self.quick_command = value,
@@ -258,39 +279,64 @@ impl WorkspacePrototype {
     }
 
     fn connection_sidebar(&self) -> Element<'_, Message> {
-        let mut items: Column<'_, Message> = column![
+        let filtered: Vec<&ConnectionNode> = self
+            .connections
+            .iter()
+            .filter(|node| connection_matches(node, &self.connection_filter))
+            .collect();
+        let range = visible_file_range(
+            filtered.len(),
+            self.connection_scroll_offset,
+            self.connection_viewport_height,
+            CONNECTION_ROW_HEIGHT,
+            CONNECTION_LIST_OVERSCAN,
+        );
+
+        let mut visible_rows: Column<'_, Message> = column![];
+        for node in &filtered[range.clone()] {
+            let label = match self.selected_connection {
+                Some(id) if id == node.id => format!("● {}  {}", node.name, node.group),
+                _ => format!("{}  {}", node.name, node.group),
+            };
+            visible_rows = visible_rows.push(
+                button(text(label).size(13))
+                    .width(Fill)
+                    .height(Length::Fixed(CONNECTION_ROW_HEIGHT))
+                    .padding(2)
+                    .on_press(Message::SelectConnection(node.id)),
+            );
+        }
+
+        let top_padding = range.start as f32 * CONNECTION_ROW_HEIGHT;
+        let bottom_padding =
+            filtered.len().saturating_sub(range.end) as f32 * CONNECTION_ROW_HEIGHT;
+        let list_content = column![
+            space().height(Length::Fixed(top_padding)),
+            visible_rows,
+            space().height(Length::Fixed(bottom_padding)),
+        ];
+        let list = scrollable(list_content)
+            .height(Fill)
+            .on_scroll(|viewport| Message::ConnectionListScrolled {
+                offset: viewport.absolute_offset().y,
+                viewport_height: viewport.bounds().height,
+            });
+
+        let header = column![
             text("Connections").size(17),
             text_input("Filter 1,000 demo hosts…", &self.connection_filter)
                 .on_input(Message::ConnectionFilterChanged),
         ]
         .spacing(8);
+        let footer = text(format!(
+            "{} / {} hosts · rendering {} rows",
+            filtered.len(),
+            self.connections.len(),
+            range.len()
+        ))
+        .size(11);
 
-        let needle = self.connection_filter.to_lowercase();
-        let mut visible = 0usize;
-
-        for node in &self.connections {
-            if !needle.is_empty()
-                && !node.name.to_lowercase().contains(&needle)
-                && !node.group.to_lowercase().contains(&needle)
-            {
-                continue;
-            }
-
-            visible += 1;
-            let label = match self.selected_connection {
-                Some(id) if id == node.id => format!("● {}  {}", node.name, node.group),
-                _ => format!("{}  {}", node.name, node.group),
-            };
-            items = items.push(
-                button(text(label).size(13))
-                    .width(Fill)
-                    .on_press(Message::SelectConnection(node.id)),
-            );
-        }
-
-        items = items.push(text(format!("{visible} / {} hosts", self.connections.len())).size(11));
-
-        container(scrollable(items).height(Fill))
+        container(column![header, list, footer].spacing(8))
             .padding(8)
             .width(Fill)
             .height(Fill)
@@ -521,6 +567,58 @@ mod tests {
                 .iter()
                 .any(|node| node.name == "server-0999")
         );
+    }
+
+    #[test]
+    fn connection_filter_returns_expected_hosts_and_groups() {
+        let connections = demo_connections();
+        let server_match = connections
+            .iter()
+            .filter(|node| connection_matches(node, "server-0999"))
+            .map(|node| node.id)
+            .collect::<Vec<_>>();
+        let group_match = connections
+            .iter()
+            .filter(|node| connection_matches(node, "Group 10"))
+            .count();
+
+        assert_eq!(server_match, vec![999]);
+        assert_eq!(group_match, 100);
+        assert_eq!(
+            connections
+                .iter()
+                .filter(|node| connection_matches(node, "no-such-host"))
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn connection_virtualization_clamps_when_filter_shrinks_the_dataset() {
+        let range = visible_file_range(
+            3,
+            99_999.0,
+            130.0,
+            CONNECTION_ROW_HEIGHT,
+            CONNECTION_LIST_OVERSCAN,
+        );
+
+        assert_eq!(range, 0..3);
+    }
+
+    #[test]
+    fn connection_selection_is_stable_by_host_id() {
+        let mut app = WorkspacePrototype::default();
+        app.update(Message::SelectConnection(999));
+        app.update(Message::ConnectionFilterChanged("server-0999".to_owned()));
+
+        let selected = app
+            .connections
+            .iter()
+            .find(|node| connection_matches(node, &app.connection_filter))
+            .expect("filtered host exists");
+
+        assert_eq!(selected.id, app.selected_connection.expect("selection retained"));
     }
 
     #[test]
