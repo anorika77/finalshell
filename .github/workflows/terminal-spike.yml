@@ -15,13 +15,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: terminal-spike-\${{ github.ref }}
+  group: terminal-spike-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   terminal-core:
-    name: Terminal core (\${{ matrix.name }})
-    runs-on: \${{ matrix.runner }}
+    name: Terminal core (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -29,19 +29,19 @@ jobs:
         include:
           - name: macOS ARM64
             runner: macos-15
-            needs-zig: false
+            needs_zig: false
           - name: macOS x86_64
             runner: macos-15-intel
-            needs-zig: false
+            needs_zig: false
           - name: Linux x86_64
             runner: ubuntu-24.04
-            needs-zig: true
+            needs_zig: true
           - name: Linux ARM64
             runner: ubuntu-24.04-arm
-            needs-zig: true
+            needs_zig: true
           - name: Windows x86_64 MSVC
             runner: windows-2025
-            needs-zig: true
+            needs_zig: true
 
     steps:
       - uses: actions/checkout@v6
@@ -54,11 +54,11 @@ jobs:
           matcher: true
 
       - name: Set up Zig for source builds
-        if: matrix.needs-zig
+        if: matrix.needs_zig
         uses: mlugg/setup-zig@v2
         with:
           version: "0.17.0"
-          cache-key: terminal-spike-\${{ matrix.name }}
+          cache-key: terminal-spike-${{ matrix.name }}
 
       - name: Print toolchain versions
         run: |
