@@ -178,14 +178,12 @@ fn shortcut_message(
                 None
             }
         }
-        Key::Character(character) if modifiers.alt() => {
-            match character.as_str() {
-                "1" => Some(Message::SelectMonitor(MonitorTab::Overview)),
-                "2" => Some(Message::SelectMonitor(MonitorTab::Network)),
-                "3" => Some(Message::SelectMonitor(MonitorTab::Processes)),
-                _ => None,
-            }
-        }
+        Key::Character(character) if modifiers.alt() => match character.as_str() {
+            "1" => Some(Message::SelectMonitor(MonitorTab::Overview)),
+            "2" => Some(Message::SelectMonitor(MonitorTab::Network)),
+            "3" => Some(Message::SelectMonitor(MonitorTab::Processes)),
+            _ => None,
+        },
         _ => None,
     }
 }
