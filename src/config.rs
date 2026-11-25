@@ -741,7 +741,7 @@ mod tests {
         assert_eq!(store.folder(&child).unwrap().parent, "");
         assert_eq!(store.host("db").unwrap().folder, child);
         assert_eq!(store.subfolders("").len(), 1);
-        assert!(store.remove_folder("f-does-not-exist") == false);
+        assert!(!store.remove_folder("f-does-not-exist"));
         assert!(store.remove_folder(&child));
         assert_eq!(store.host("db").unwrap().folder, "");
         assert!(store.folders.is_empty());
