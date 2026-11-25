@@ -327,7 +327,7 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("monitor-network")
-                                            .debug_selector("monitor-network")
+                                            .debug_selector(|| "monitor-network".to_string())
                                             .child(if self.monitor_tab == MonitorTab::Network {
                                                 "[Network]"
                                             } else {
@@ -341,7 +341,7 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("monitor-processes")
-                                            .debug_selector("monitor-processes")
+                                            .debug_selector(|| "monitor-processes".to_string())
                                             .child(if self.monitor_tab == MonitorTab::Processes {
                                                 "[Processes]"
                                             } else {
