@@ -2,12 +2,12 @@
 name = "finallyshell-rs"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.89"
 description = "A cross-platform Rust rewrite of FinalShell"
 repository = "https://github.com/anorika77/finalshell"
 publish = false
 
 [dependencies]
 serde_json = "=1.0.150"
-russh = { version = "=0.55.0", default-features = false, features = ["ring", "rsa", "flate2"] }
+russh = { version = "=0.65.4", default-features = false, features = ["ring", "rsa", "flate2"] }
 tokio = { version = "1", features = ["net", "rt-multi-thread", "sync", "time", "io-util"] }
