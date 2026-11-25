@@ -385,7 +385,9 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("connection-filter-production")
-                                            .debug_selector(|| "connection-filter-production".to_string())
+                                            .debug_selector(|| {
+                                                "connection-filter-production".to_string()
+                                            })
                                             .child(if self.connection_filter == "production" {
                                                 "[Prod]"
                                             } else {
@@ -399,7 +401,9 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("connection-filter-database")
-                                            .debug_selector(|| "connection-filter-database".to_string())
+                                            .debug_selector(|| {
+                                                "connection-filter-database".to_string()
+                                            })
                                             .child(if self.connection_filter == "database" {
                                                 "[DB]"
                                             } else {
@@ -420,7 +424,9 @@ impl Render for WorkspacePrototype {
                                         let workspace = workspace.clone();
                                         div()
                                             .id(format!("connection-host-{}", host.id))
-                                            .debug_selector(move || format!("connection-host-{}", host.id))
+                                            .debug_selector(move || {
+                                                format!("connection-host-{}", host.id)
+                                            })
                                             .h(px(26.0))
                                             .px_1()
                                             .child(if selected {
@@ -648,9 +654,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn headless_ui_connection_filters_and_host_selection_are_interactive(
-        cx: &mut TestAppContext,
-    ) {
+    fn headless_ui_connection_filters_and_host_selection_are_interactive(cx: &mut TestAppContext) {
         let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
 
         workspace.update(cx, |workspace, _| {
@@ -690,7 +694,12 @@ mod tests {
         workspace.read_with(cx, |workspace, _| {
             assert_eq!(workspace.connection_filter, "production");
             assert_eq!(workspace.selected_host_id, Some(4));
-            assert!(workspace.filtered_connection_hosts().iter().any(|host| host.id == 4));
+            assert!(
+                workspace
+                    .filtered_connection_hosts()
+                    .iter()
+                    .any(|host| host.id == 4)
+            );
         });
 
         let database_filter = cx
