@@ -239,7 +239,8 @@ impl SshClient {
         channel: &Channel<client::Msg>,
         data: impl Into<Vec<u8>>,
     ) -> Result<(), SshError> {
-        channel.data_bytes(data.into()).await?;
+        let data = data.into();
+        channel.data(data.as_slice()).await?;
         Ok(())
     }
 
