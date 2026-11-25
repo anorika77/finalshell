@@ -706,7 +706,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Modifiers, MouseButton, TestApp, TestAppContext, point};
+    use gpui::{ListOffset, Modifiers, MouseButton, TestApp, TestAppContext, point};
 
     #[test]
     fn monitor_tabs_select_the_matching_panel_content() {
@@ -1003,6 +1003,30 @@ mod tests {
         workspace.read_with(cx, |workspace, _| {
             assert_eq!(workspace.file_filter, "log");
             assert_eq!(workspace.selected_file_id, None);
+        });
+    }
+
+    #[gpui::test]
+    fn headless_ui_file_list_scrolls_to_distant_virtualized_rows(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.file_list_state.scroll_to(ListOffset {
+                item_ix: 9_000,
+                offset_in_item: px(0.0),
+            });
+            cx.notify();
+        });
+
+        let distant_file = cx
+            .debug_bounds("file-entry-9001")
+            .expect("file 9001 should render after scrolling to its virtualized range");
+        cx.simulate_click(distant_file.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            let offset = workspace.file_list_state.logical_scroll_top();
+            assert_eq!(offset.item_ix, 9_000);
+            assert_eq!(workspace.selected_file_id, Some(9_001));
         });
     }
 
