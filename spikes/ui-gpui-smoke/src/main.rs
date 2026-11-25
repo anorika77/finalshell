@@ -1211,7 +1211,13 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(app.panes().iter().map(|pane| pane.pane_id).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(
+            app.panes()
+                .iter()
+                .map(|pane| pane.pane_id)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
         assert_eq!(app.focused_pane_id, 1);
         assert_eq!(app.sessions, BTreeSet::from([101]));
     }
