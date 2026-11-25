@@ -327,6 +327,7 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("monitor-network")
+                                            .debug_selector("monitor-network")
                                             .child(if self.monitor_tab == MonitorTab::Network {
                                                 "[Network]"
                                             } else {
@@ -340,6 +341,7 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("monitor-processes")
+                                            .debug_selector("monitor-processes")
                                             .child(if self.monitor_tab == MonitorTab::Processes {
                                                 "[Processes]"
                                             } else {
@@ -384,7 +386,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{MouseButton, TestApp, point};
+    use gpui::{Modifiers, MouseButton, TestApp, TestAppContext, point};
 
     #[test]
     fn monitor_tabs_select_the_matching_panel_content() {
@@ -398,23 +400,23 @@ mod tests {
         assert_eq!(app.monitor_tab, MonitorTab::Processes);
     }
 
-    #[test]
-    fn headless_ui_monitor_tabs_change_the_rendered_panel() {
-        let mut app = TestApp::new();
-        let mut window = app.open_window(|_, _| WorkspacePrototype::default());
+    #[gpui::test]
+    fn headless_ui_monitor_tabs_change_the_rendered_panel(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
 
-        let window_width = window.update(|_, window, _| window.bounds().size.width);
-        let monitor_left = window_width - px(220.0);
-
-        window.draw();
-        window.simulate_click(point(monitor_left + px(85.0), px(60.0)), MouseButton::Left);
-        window.read(|workspace, _| {
+        let network_bounds = cx
+            .debug_bounds("monitor-network")
+            .expect("network tab should have rendered bounds");
+        cx.simulate_click(network_bounds.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
             assert_eq!(workspace.monitor_tab, MonitorTab::Network);
         });
 
-        window.draw();
-        window.simulate_click(point(monitor_left + px(155.0), px(60.0)), MouseButton::Left);
-        window.read(|workspace, _| {
+        let processes_bounds = cx
+            .debug_bounds("monitor-processes")
+            .expect("processes tab should have rendered bounds");
+        cx.simulate_click(processes_bounds.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
             assert_eq!(workspace.monitor_tab, MonitorTab::Processes);
         });
     }
