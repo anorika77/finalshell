@@ -291,12 +291,29 @@ async fn authenticate_agent(
 
 #[cfg(windows)]
 async fn authenticate_agent(
-    _handle: &mut client::Handle<HostKeyVerifier>,
-    _user: &str,
+    handle: &mut client::Handle<HostKeyVerifier>,
+    user: &str,
 ) -> Result<russh::AuthResult, SshError> {
-    Err(SshError::UnsupportedAuthentication(
-        "agent (Windows Pageant support pending)".to_owned(),
-    ))
+    let mut agent = AgentClient::connect_pageant()
+        .await
+        .map_err(SshError::Agent)?
+        .dynamic();
+    let identities = agent.request_identities().await.map_err(SshError::Agent)?;
+    if identities.is_empty() {
+        return Err(SshError::AuthenticationRejected);
+    }
+
+    for key in identities {
+        let hash = handle.best_supported_rsa_hash().await?.flatten();
+        let result = handle
+            .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
+            .await
+            .map_err(SshError::Agent)?;
+        if result.success() {
+            return Ok(result);
+        }
+    }
+    Err(SshError::AuthenticationRejected)
 }
 
 #[cfg(not(any(unix, windows)))]
