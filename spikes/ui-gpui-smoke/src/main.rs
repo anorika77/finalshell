@@ -400,6 +400,7 @@ impl Render for WorkspacePrototype {
                     .child(
                         div()
                             .id("split-vertical")
+                            .debug_selector(|| "split-vertical".to_string())
                             .w(px(110.0))
                             .h(px(32.0))
                             .child("[Split V]  ")
@@ -1091,6 +1092,52 @@ mod tests {
             assert_eq!(panes.len(), 1);
             assert_eq!(panes[0].pane_id, 2);
             assert_eq!(panes[0].session_id, 101);
+            assert!(workspace.session_is_active(101));
+            assert_eq!(workspace.sessions.len(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn headless_ui_nested_split_layout_and_collapse_preserve_sessions(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        let horizontal_split = cx
+            .debug_bounds("split-horizontal")
+            .expect("horizontal split control should be rendered");
+        cx.simulate_click(horizontal_split.center(), Modifiers::default());
+
+        let vertical_split = cx
+            .debug_bounds("split-vertical")
+            .expect("vertical split control should be rendered");
+        cx.simulate_click(vertical_split.center(), Modifiers::default());
+
+        let second_pane = cx
+            .debug_bounds("pane-2")
+            .expect("second pane should be rendered");
+        let third_pane = cx
+            .debug_bounds("pane-3")
+            .expect("third pane should be rendered");
+
+        assert!(second_pane.origin.y < third_pane.origin.y);
+        assert!((second_pane.origin.x - third_pane.origin.x).abs() < px(1.0));
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.root.leaf_count(), 3);
+            assert_eq!(workspace.sessions.len(), 1);
+            assert_eq!(workspace.focused_pane_id, 3);
+            assert!(workspace.panes().iter().all(|pane| pane.session_id == 101));
+        });
+
+        let close_button = cx
+            .debug_bounds("close-pane")
+            .expect("close control should be rendered");
+        cx.simulate_click(close_button.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            let panes = workspace.panes();
+            assert_eq!(panes.len(), 2);
+            assert_eq!(panes.iter().map(|pane| pane.pane_id).collect::<Vec<_>>(), [1, 2]);
+            assert!(panes.iter().all(|pane| pane.session_id == 101));
             assert!(workspace.session_is_active(101));
             assert_eq!(workspace.sessions.len(), 1);
         });
