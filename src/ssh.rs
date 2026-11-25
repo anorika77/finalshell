@@ -178,7 +178,7 @@ impl Handler for HostKeyVerifier {
                 known_hosts::learn_known_hosts_path(
                     &self.host,
                     self.port,
-                    server_public_key,
+                    &server_public_key,
                     &self.path,
                 )
                 .map_err(SshError::KnownHosts)?;
@@ -188,7 +188,7 @@ impl Handler for HostKeyVerifier {
                 known_hosts::learn_known_hosts_path(
                     &self.host,
                     self.port,
-                    server_public_key,
+                    &server_public_key,
                     &self.path,
                 )
                 .map_err(SshError::KnownHosts)?;
