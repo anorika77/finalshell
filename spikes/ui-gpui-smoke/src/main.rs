@@ -433,7 +433,6 @@ impl Render for WorkspacePrototype {
                                             .into_any_element()
                                     },
                                 )
-                                .with_uniform_item_height(px(26.0))
                                 .flex_1(),
                             )
                             .child(format!("{visible_count} / 1,000 hosts"))
