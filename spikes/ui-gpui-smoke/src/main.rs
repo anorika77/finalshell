@@ -647,7 +647,7 @@ mod tests {
     fn connection_tree_filters_and_preserves_selection_by_host_id() {
         let mut app = WorkspacePrototype::default();
         assert_eq!(app.connection_hosts.len(), 1_000);
-        app.selected_host_id = Some(2);
+        app.selected_host_id = Some(1);
         app.set_connection_filter("database");
         let filtered = app.filtered_connection_hosts();
         assert_eq!(filtered.len(), 333);
@@ -668,15 +668,19 @@ mod tests {
     #[test]
     fn connection_selection_uses_stable_host_identity() {
         let mut app = WorkspacePrototype::default();
-        let host_id = app.connection_hosts[42].id;
+        let host_id = app.connection_hosts[3].id;
+        assert_eq!(host_id, 4);
         app.selected_host_id = Some(host_id);
-        app.set_connection_filter("web");
+        app.set_connection_filter("production");
+        let filtered = app.filtered_connection_hosts();
+        let filtered_index = filtered
+            .iter()
+            .position(|host| host.id == host_id)
+            .expect("selected host should remain in the filtered list");
+
         assert_eq!(app.selected_host_id, Some(host_id));
-        assert!(
-            app.filtered_connection_hosts()
-                .iter()
-                .any(|host| host.id == host_id)
-        );
+        assert_eq!(filtered_index, 1);
+        assert_eq!(filtered[filtered_index].id, host_id);
     }
 
     #[test]
