@@ -262,7 +262,6 @@ impl SshClient {
     }
 }
 
-
 #[cfg(unix)]
 async fn authenticate_agent(
     handle: &mut client::Handle<HostKeyVerifier>,
