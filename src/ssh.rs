@@ -11,7 +11,17 @@ use crate::config::{AUTH_AGENT, AUTH_KEY, AUTH_PASSWORD, Host};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostKeyPolicy {
     Strict,
+    Ask,
     AcceptNew,
+}
+
+#[derive(Debug)]
+pub struct HostKeyPrompt {
+    pub host: String,
+    pub port: u16,
+    pub key_type: String,
+    pub fingerprint: String,
+    pub reply: tokio::sync::oneshot::Sender<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,6 +31,8 @@ pub struct SshOptions {
     pub connect_timeout: Duration,
     pub keepalive_interval: Option<Duration>,
     pub keepalive_max: usize,
+    pub host_key_prompt: Option<tokio::sync::mpsc::Sender<HostKeyPrompt>>,
+    pub host_key_prompt_timeout: Duration,
 }
 
 impl SshOptions {
@@ -31,6 +43,8 @@ impl SshOptions {
             connect_timeout: Duration::from_secs(15),
             keepalive_interval: Some(Duration::from_secs(30)),
             keepalive_max: 3,
+            host_key_prompt: None,
+            host_key_prompt_timeout: Duration::from_secs(120),
         }
     }
 }
@@ -50,6 +64,9 @@ pub enum SshError {
     UnknownHostKey { host: String, port: u16 },
     ChangedHostKey { host: String, port: u16 },
     AuthenticationRejected,
+    HostKeyConfirmationRejected,
+    HostKeyConfirmationUnavailable,
+    HostKeyConfirmationTimeout,
     MissingCredentials,
     UnsupportedAuthentication(String),
     KeyFile(keys::Error),
@@ -69,6 +86,9 @@ impl std::fmt::Display for SshError {
                 write!(f, "SSH host key changed for {host}:{port}")
             }
             Self::AuthenticationRejected => write!(f, "SSH authentication rejected"),
+            Self::HostKeyConfirmationRejected => write!(f, "SSH host key was rejected by the user"),
+            Self::HostKeyConfirmationUnavailable => write!(f, "SSH host key confirmation UI is unavailable"),
+            Self::HostKeyConfirmationTimeout => write!(f, "SSH host key confirmation timed out"),
             Self::MissingCredentials => write!(f, "SSH credentials are missing"),
             Self::UnsupportedAuthentication(kind) => {
                 write!(f, "unsupported SSH authentication method: {kind}")
@@ -94,6 +114,8 @@ struct HostKeyVerifier {
     port: u16,
     path: PathBuf,
     policy: HostKeyPolicy,
+    prompt: Option<tokio::sync::mpsc::Sender<HostKeyPrompt>>,
+    prompt_timeout: Duration,
 }
 
 impl Handler for HostKeyVerifier {
@@ -122,6 +144,40 @@ impl Handler for HostKeyVerifier {
                 host: self.host.clone(),
                 port: self.port,
             }),
+            HostKeyPolicy::Ask => {
+                let Some(sender) = &self.prompt else {
+                    return Err(SshError::UnknownHostKey {
+                        host: self.host.clone(),
+                        port: self.port,
+                    });
+                };
+                let (reply, response) = tokio::sync::oneshot::channel();
+                let prompt = HostKeyPrompt {
+                    host: self.host.clone(),
+                    port: self.port,
+                    key_type: server_public_key.algorithm().as_str().to_owned(),
+                    fingerprint: server_public_key
+                        .fingerprint(keys::HashAlg::Sha256)
+                        .to_string(),
+                    reply,
+                };
+                sender.send(prompt).await.map_err(|_| SshError::HostKeyConfirmationUnavailable)?;
+                let accepted = tokio::time::timeout(self.prompt_timeout, response)
+                    .await
+                    .map_err(|_| SshError::HostKeyConfirmationTimeout)?
+                    .map_err(|_| SshError::HostKeyConfirmationUnavailable)?;
+                if !accepted {
+                    return Err(SshError::HostKeyConfirmationRejected);
+                }
+                known_hosts::learn_known_hosts_path(
+                    &self.host,
+                    self.port,
+                    server_public_key,
+                    &self.path,
+                )
+                .map_err(SshError::KnownHosts)?;
+                Ok(true)
+            }
             HostKeyPolicy::AcceptNew => {
                 known_hosts::learn_known_hosts_path(
                     &self.host,
@@ -154,6 +210,8 @@ impl SshClient {
             port,
             path: options.known_hosts_path,
             policy: options.host_key_policy,
+            prompt: options.host_key_prompt,
+            prompt_timeout: options.host_key_prompt_timeout,
         };
         let config = client::Config {
             keepalive_interval: options.keepalive_interval,
@@ -350,6 +408,8 @@ mod tests {
         let options = SshOptions::new("known_hosts");
         assert_eq!(options.host_key_policy, HostKeyPolicy::Strict);
         assert_eq!(options.connect_timeout, Duration::from_secs(15));
+        assert_eq!(options.host_key_prompt_timeout, Duration::from_secs(120));
+        assert!(options.host_key_prompt.is_none());
     }
 
     #[test]
