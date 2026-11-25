@@ -1,6 +1,9 @@
 use std::collections::BTreeSet;
 
-use gpui::{AnyElement, App, Context, ListAlignment, ListState, QuitMode, Window, WindowOptions, div, list, prelude::*, px};
+use gpui::{
+    AnyElement, App, Context, ListAlignment, ListState, QuitMode, Window, WindowOptions, div, list,
+    prelude::*, px,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ConnectionHost {
@@ -178,7 +181,10 @@ impl WorkspacePrototype {
 
     fn host_matches_filter(&self, host: &ConnectionHost) -> bool {
         self.connection_filter.is_empty()
-            || host.name.to_ascii_lowercase().contains(&self.connection_filter)
+            || host
+                .name
+                .to_ascii_lowercase()
+                .contains(&self.connection_filter)
             || host.group.contains(&self.connection_filter)
     }
 
@@ -365,7 +371,11 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("connection-filter-all")
-                                            .child(if self.connection_filter.is_empty() { "[All]" } else { "All" })
+                                            .child(if self.connection_filter.is_empty() {
+                                                "[All]"
+                                            } else {
+                                                "All"
+                                            })
                                             .on_click(cx.listener(|this, _event, _window, cx| {
                                                 this.set_connection_filter("");
                                                 cx.notify();
@@ -374,7 +384,11 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("connection-filter-production")
-                                            .child(if self.connection_filter == "production" { "[Prod]" } else { "Prod" })
+                                            .child(if self.connection_filter == "production" {
+                                                "[Prod]"
+                                            } else {
+                                                "Prod"
+                                            })
                                             .on_click(cx.listener(|this, _event, _window, cx| {
                                                 this.set_connection_filter("production");
                                                 cx.notify();
@@ -383,7 +397,11 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("connection-filter-database")
-                                            .child(if self.connection_filter == "database" { "[DB]" } else { "DB" })
+                                            .child(if self.connection_filter == "database" {
+                                                "[DB]"
+                                            } else {
+                                                "DB"
+                                            })
                                             .on_click(cx.listener(|this, _event, _window, cx| {
                                                 this.set_connection_filter("database");
                                                 cx.notify();
@@ -391,27 +409,30 @@ impl Render for WorkspacePrototype {
                                     ),
                             )
                             .child(
-                                list(self.connection_list_state.clone(), move |ix, _window, _app| {
-                                    let host = filtered_hosts[ix].clone();
-                                    let selected = selected_host_id == Some(host.id);
-                                    let workspace = workspace.clone();
-                                    div()
-                                        .id(format!("connection-host-{}", host.id))
-                                        .h(px(26.0))
-                                        .px_1()
-                                        .child(if selected {
-                                            format!("▶ {}", host.name)
-                                        } else {
-                                            host.name
-                                        })
-                                        .on_click(move |_event, _window, app| {
-                                            workspace.update(app, |this, cx| {
-                                                this.selected_host_id = Some(host.id);
-                                                cx.notify();
-                                            });
-                                        })
-                                        .into_any_element()
-                                })
+                                list(
+                                    self.connection_list_state.clone(),
+                                    move |ix, _window, _app| {
+                                        let host = filtered_hosts[ix].clone();
+                                        let selected = selected_host_id == Some(host.id);
+                                        let workspace = workspace.clone();
+                                        div()
+                                            .id(format!("connection-host-{}", host.id))
+                                            .h(px(26.0))
+                                            .px_1()
+                                            .child(if selected {
+                                                format!("▶ {}", host.name)
+                                            } else {
+                                                host.name
+                                            })
+                                            .on_click(move |_event, _window, app| {
+                                                workspace.update(app, |this, cx| {
+                                                    this.selected_host_id = Some(host.id);
+                                                    cx.notify();
+                                                });
+                                            })
+                                            .into_any_element()
+                                    },
+                                )
                                 .with_uniform_item_height(px(26.0))
                                 .flex_1(),
                             )
@@ -638,7 +659,11 @@ mod tests {
         app.selected_host_id = Some(4);
         app.set_connection_filter("production");
         assert_eq!(app.selected_host_id, Some(4));
-        assert!(app.filtered_connection_hosts().iter().any(|host| host.id == 4));
+        assert!(
+            app.filtered_connection_hosts()
+                .iter()
+                .any(|host| host.id == 4)
+        );
     }
 
     #[test]
@@ -648,7 +673,11 @@ mod tests {
         app.selected_host_id = Some(host_id);
         app.set_connection_filter("web");
         assert_eq!(app.selected_host_id, Some(host_id));
-        assert!(app.filtered_connection_hosts().iter().any(|host| host.id == host_id));
+        assert!(
+            app.filtered_connection_hosts()
+                .iter()
+                .any(|host| host.id == host_id)
+        );
     }
 
     #[test]
