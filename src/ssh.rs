@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use russh::{
     Channel, Disconnect,
     client::{self, Handler},
-    keys::{self, PrivateKeyWithHashAlg, known_hosts},
+    keys::{self, PrivateKeyWithHashAlg, agent::client::AgentClient, known_hosts},
 };
 
 use crate::config::{AUTH_AGENT, AUTH_KEY, AUTH_PASSWORD, Host};
@@ -53,6 +53,7 @@ pub enum SshError {
     MissingCredentials,
     UnsupportedAuthentication(String),
     KeyFile(keys::Error),
+    Agent(keys::Error),
     KnownHosts(keys::Error),
     Transport(russh::Error),
 }
@@ -73,6 +74,7 @@ impl std::fmt::Display for SshError {
                 write!(f, "unsupported SSH authentication method: {kind}")
             }
             Self::KeyFile(error) => write!(f, "SSH private key: {error}"),
+            Self::Agent(error) => write!(f, "SSH agent: {error}"),
             Self::KnownHosts(error) => write!(f, "SSH known_hosts: {error}"),
             Self::Transport(error) => write!(f, "SSH transport: {error}"),
         }
@@ -181,9 +183,7 @@ impl SshClient {
                     )
                     .await?
             }
-            (AUTH_AGENT, _) => {
-                return Err(SshError::UnsupportedAuthentication(AUTH_AGENT.to_owned()));
-            }
+            (AUTH_AGENT, _) => authenticate_agent(&mut handle, &host.user).await?,
             (kind, _) => {
                 return Err(SshError::UnsupportedAuthentication(kind.to_owned()));
             }
@@ -260,6 +260,52 @@ impl SshClient {
             .await?;
         Ok(())
     }
+}
+
+
+#[cfg(unix)]
+async fn authenticate_agent(
+    handle: &mut client::Handle<HostKeyVerifier>,
+    user: &str,
+) -> Result<russh::AuthResult, SshError> {
+    let mut agent = AgentClient::connect_env()
+        .await
+        .map_err(SshError::Agent)?
+        .dynamic();
+    let identities = agent.request_identities().await.map_err(SshError::Agent)?;
+    if identities.is_empty() {
+        return Err(SshError::AuthenticationRejected);
+    }
+
+    for key in identities {
+        let hash = handle.best_supported_rsa_hash().await?.flatten();
+        let result = handle
+            .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
+            .await
+            .map_err(SshError::Agent)?;
+        if result.success() {
+            return Ok(result);
+        }
+    }
+    Err(SshError::AuthenticationRejected)
+}
+
+#[cfg(windows)]
+async fn authenticate_agent(
+    _handle: &mut client::Handle<HostKeyVerifier>,
+    _user: &str,
+) -> Result<russh::AuthResult, SshError> {
+    Err(SshError::UnsupportedAuthentication(
+        "agent (Windows Pageant support pending)".to_owned(),
+    ))
+}
+
+#[cfg(not(any(unix, windows)))]
+async fn authenticate_agent(
+    _handle: &mut client::Handle<HostKeyVerifier>,
+    _user: &str,
+) -> Result<russh::AuthResult, SshError> {
+    Err(SshError::UnsupportedAuthentication(AUTH_AGENT.to_owned()))
 }
 
 fn expand_home(path: PathBuf) -> PathBuf {
