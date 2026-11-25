@@ -1,6 +1,32 @@
 use std::collections::BTreeSet;
 
-use gpui::{AnyElement, App, Context, QuitMode, Window, WindowOptions, div, prelude::*, px};
+use gpui::{AnyElement, App, Context, ListAlignment, ListState, QuitMode, Window, WindowOptions, div, list, prelude::*, px};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConnectionHost {
+    id: u64,
+    name: String,
+    group: &'static str,
+}
+
+impl ConnectionHost {
+    fn fixture() -> Vec<Self> {
+        (0..1_000_u64)
+            .map(|id| {
+                let group = match id % 3 {
+                    0 => "production",
+                    1 => "database",
+                    _ => "web",
+                };
+                Self {
+                    id: id + 1,
+                    name: format!("{group}-host-{:04}", id + 1),
+                    group,
+                }
+            })
+            .collect()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MonitorTab {
@@ -108,6 +134,10 @@ struct WorkspacePrototype {
     focused_pane_id: u64,
     next_pane_id: u64,
     sessions: BTreeSet<u64>,
+    connection_hosts: Vec<ConnectionHost>,
+    connection_filter: String,
+    connection_list_state: ListState,
+    selected_host_id: Option<u64>,
 }
 
 impl Default for WorkspacePrototype {
@@ -121,11 +151,45 @@ impl Default for WorkspacePrototype {
             next_pane_id: 2,
             monitor_tab: MonitorTab::Overview,
             sessions: BTreeSet::from([101]),
+            connection_hosts: ConnectionHost::fixture(),
+            connection_filter: String::new(),
+            connection_list_state: ListState::new(1_000, ListAlignment::Top, px(52.0))
+                .with_uniform_item_height(px(26.0)),
+            selected_host_id: None,
         }
     }
 }
 
 impl WorkspacePrototype {
+    fn set_connection_filter(&mut self, filter: &str) {
+        self.connection_filter = filter.to_ascii_lowercase();
+        let count = self.filtered_connection_hosts().len();
+        self.connection_list_state
+            .reset_with_uniform_height(count, px(26.0));
+        if self.selected_host_id.is_some_and(|selected| {
+            !self
+                .connection_hosts
+                .iter()
+                .any(|host| host.id == selected && self.host_matches_filter(host))
+        }) {
+            self.selected_host_id = None;
+        }
+    }
+
+    fn host_matches_filter(&self, host: &ConnectionHost) -> bool {
+        self.connection_filter.is_empty()
+            || host.name.to_ascii_lowercase().contains(&self.connection_filter)
+            || host.group.contains(&self.connection_filter)
+    }
+
+    fn filtered_connection_hosts(&self) -> Vec<ConnectionHost> {
+        self.connection_hosts
+            .iter()
+            .filter(|host| self.host_matches_filter(host))
+            .cloned()
+            .collect()
+    }
+
     fn select_monitor(&mut self, tab: MonitorTab) {
         self.monitor_tab = tab;
     }
@@ -285,14 +349,74 @@ impl Render for WorkspacePrototype {
                 div()
                     .flex()
                     .flex_1()
-                    .child(
+                    .child({
+                        let filtered_hosts = self.filtered_connection_hosts();
+                        let visible_count = filtered_hosts.len();
+                        let selected_host_id = self.selected_host_id;
+                        let workspace = cx.entity().clone();
                         div()
                             .flex()
                             .flex_col()
                             .w(px(220.0))
                             .child("Connections")
-                            .child("1,000 mock hosts"),
-                    )
+                            .child(
+                                div()
+                                    .flex()
+                                    .child(
+                                        div()
+                                            .id("connection-filter-all")
+                                            .child(if self.connection_filter.is_empty() { "[All]" } else { "All" })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.set_connection_filter("");
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("connection-filter-production")
+                                            .child(if self.connection_filter == "production" { "[Prod]" } else { "Prod" })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.set_connection_filter("production");
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("connection-filter-database")
+                                            .child(if self.connection_filter == "database" { "[DB]" } else { "DB" })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.set_connection_filter("database");
+                                                cx.notify();
+                                            })),
+                                    ),
+                            )
+                            .child(
+                                list(self.connection_list_state.clone(), move |ix, _window, _app| {
+                                    let host = filtered_hosts[ix].clone();
+                                    let selected = selected_host_id == Some(host.id);
+                                    let workspace = workspace.clone();
+                                    div()
+                                        .id(format!("connection-host-{}", host.id))
+                                        .h(px(26.0))
+                                        .px_1()
+                                        .child(if selected {
+                                            format!("▶ {}", host.name)
+                                        } else {
+                                            host.name
+                                        })
+                                        .on_click(move |_event, _window, app| {
+                                            workspace.update(app, |this, cx| {
+                                                this.selected_host_id = Some(host.id);
+                                                cx.notify();
+                                            });
+                                        })
+                                        .into_any_element()
+                                })
+                                .with_uniform_item_height(px(26.0))
+                                .flex_1(),
+                            )
+                            .child(format!("{visible_count} / 1,000 hosts"))
+                    })
                     .child(
                         div()
                             .flex()
@@ -497,6 +621,34 @@ mod tests {
             assert_eq!(workspace.sessions.len(), 1);
             assert!(workspace.session_is_active(101));
         });
+    }
+
+    #[test]
+    fn connection_tree_filters_and_preserves_selection_by_host_id() {
+        let mut app = WorkspacePrototype::default();
+        assert_eq!(app.connection_hosts.len(), 1_000);
+        app.selected_host_id = Some(2);
+        app.set_connection_filter("database");
+        let filtered = app.filtered_connection_hosts();
+        assert_eq!(filtered.len(), 333);
+        assert!(filtered.iter().all(|host| host.group == "database"));
+        assert_eq!(app.selected_host_id, None);
+
+        app.set_connection_filter("");
+        app.selected_host_id = Some(4);
+        app.set_connection_filter("production");
+        assert_eq!(app.selected_host_id, Some(4));
+        assert!(app.filtered_connection_hosts().iter().any(|host| host.id == 4));
+    }
+
+    #[test]
+    fn connection_selection_uses_stable_host_identity() {
+        let mut app = WorkspacePrototype::default();
+        let host_id = app.connection_hosts[42].id;
+        app.selected_host_id = Some(host_id);
+        app.set_connection_filter("web");
+        assert_eq!(app.selected_host_id, Some(host_id));
+        assert!(app.filtered_connection_hosts().iter().any(|host| host.id == host_id));
     }
 
     #[test]
