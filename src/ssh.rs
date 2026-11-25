@@ -266,7 +266,7 @@ impl SshClient {
 async fn authenticate_agent(
     handle: &mut client::Handle<HostKeyVerifier>,
     user: &str,
-) -> Result<russh::AuthResult, SshError> {
+) -> Result<client::AuthResult, SshError> {
     let mut agent = AgentClient::connect_env()
         .await
         .map_err(SshError::Agent)?
@@ -281,7 +281,9 @@ async fn authenticate_agent(
         let result = handle
             .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
             .await
-            .map_err(SshError::Agent)?;
+            .map_err(|error| {
+                SshError::UnsupportedAuthentication(format!("SSH agent signing failed: {error}"))
+            })?;
         if result.success() {
             return Ok(result);
         }
