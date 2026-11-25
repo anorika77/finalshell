@@ -52,13 +52,6 @@ jobs:
           cargo --version
           rustc -vV
 
-      - name: Resolve dependency lockfile
-        run: cargo generate-lockfile
-
-      - name: Print resolved dependency lockfile
-        if: matrix.name == 'Linux x86_64'
-        run: cat Cargo.lock
-
       - name: Format check
         run: cargo fmt --all -- --check
 
