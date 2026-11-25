@@ -101,12 +101,8 @@ impl Handler for HostKeyVerifier {
         &mut self,
         server_public_key: &keys::PublicKey,
     ) -> Result<bool, Self::Error> {
-        let known = known_hosts::known_host_keys_path(
-            &self.host,
-            self.port,
-            &self.path,
-        )
-        .map_err(SshError::KnownHosts)?;
+        let known = known_hosts::known_host_keys_path(&self.host, self.port, &self.path)
+            .map_err(SshError::KnownHosts)?;
 
         if known.iter().any(|(_, key)| key == server_public_key) {
             return Ok(true);
@@ -163,18 +159,16 @@ impl SshClient {
             nodelay: true,
             ..Default::default()
         };
-        let connect = client::connect(
-            Arc::new(config),
-            (host.addr.as_str(), port),
-            verifier,
-        );
+        let connect = client::connect(Arc::new(config), (host.addr.as_str(), port), verifier);
         let mut handle = tokio::time::timeout(options.connect_timeout, connect)
             .await
             .map_err(|_| SshError::Timeout)??;
 
         let auth = match (host.auth.as_str(), credentials) {
             (AUTH_PASSWORD, SshCredentials::Password(password)) => {
-                handle.authenticate_password(host.user.clone(), password).await?
+                handle
+                    .authenticate_password(host.user.clone(), password)
+                    .await?
             }
             (AUTH_KEY, SshCredentials::PrivateKey { path, passphrase }) => {
                 let key = keys::load_secret_key(expand_home(path), passphrase.as_deref())
@@ -257,7 +251,11 @@ impl SshClient {
 
     pub async fn disconnect(self) -> Result<(), SshError> {
         self.handle
-            .disconnect(Disconnect::ByApplication, "FinalShell closed the session", "en")
+            .disconnect(
+                Disconnect::ByApplication,
+                "FinalShell closed the session",
+                "en",
+            )
             .await?;
         Ok(())
     }
