@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use russh::{
-    Channel, ChannelMsg, Disconnect,
+    Channel, Disconnect,
     client::{self, Handler},
     keys::{self, PrivateKeyWithHashAlg, known_hosts},
 };
