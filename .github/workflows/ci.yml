@@ -53,6 +53,9 @@ jobs:
           rustc -vV
 
 
+      - name: Resolve russh dependency lockfile (temporary migration step)
+        run: cargo update -p russh --precise 0.65.4
+
       - name: Format check
         run: cargo fmt --all -- --check
 
@@ -81,3 +84,11 @@ jobs:
           path: ${{ env.BINARY }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Export resolved Cargo.lock (temporary migration step)
+        uses: actions/upload-artifact@v6
+        with:
+          name: cargo-lockfile-${{ matrix.os }}
+          path: Cargo.lock
+          if-no-files-found: error
+          retention-days: 3
