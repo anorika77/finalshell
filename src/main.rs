@@ -1,4 +1,4 @@
-mod config;
+pub mod config;
 
 fn main() {
     println!("FinalShell Rust rewrite");
