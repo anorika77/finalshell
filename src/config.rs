@@ -9,8 +9,13 @@ use std::{
 use serde_json::{Map, Value};
 
 pub const HOSTS_VERSION: u64 = 2;
+pub const AUTH_PASSWORD: &str = "password";
+pub const AUTH_KEY: &str = "key";
+pub const AUTH_AGENT: &str = "agent";
+pub const DEFAULT_TERM_TYPE: &str = "xterm-256color";
 pub const V1_BACKUP_NAME: &str = "hosts.v1.json";
 static TEMP_ID: AtomicU64 = AtomicU64::new(0);
+static ENTITY_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 pub enum ConfigError {
@@ -269,6 +274,16 @@ impl Host {
     pub fn deleted(&self) -> bool {
         !self.deleted_at.is_empty()
     }
+    pub fn term_type_or_default(&self) -> &str {
+        if self.term_type.is_empty() { DEFAULT_TERM_TYPE } else { &self.term_type }
+    }
+    pub fn monitor_enabled(&self) -> bool { !self.no_monitor }
+    pub fn remembers_password(&self) -> bool { !self.no_remember_password }
+    pub fn clone_with_id(&self, id: impl Into<String>) -> Self {
+        let mut cloned = self.clone();
+        cloned.id = id.into();
+        cloned
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -385,12 +400,91 @@ impl Store {
     }
     pub fn add(&mut self, mut host: Host) {
         if host.id.is_empty() {
-            host.id = format!("h{}", now_millis());
+            host.id = format!("h{}-{}", now_millis(), ENTITY_ID.fetch_add(1, Ordering::Relaxed));
         }
         self.hosts.push(host);
     }
     pub fn live(&self) -> Vec<&Host> {
         self.hosts.iter().filter(|h| !h.deleted()).collect()
+    }
+    pub fn deleted_hosts(&self) -> Vec<&Host> {
+        let mut hosts: Vec<_> = self.hosts.iter().filter(|h| h.deleted()).collect();
+        hosts.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        hosts
+    }
+    pub fn recent(&self, limit: usize) -> Vec<&Host> {
+        let mut hosts: Vec<_> = self.hosts.iter()
+            .filter(|h| !h.deleted() && !h.last_connected_at.is_empty()).collect();
+        hosts.sort_by(|a, b| b.last_connected_at.cmp(&a.last_connected_at));
+        if limit > 0 { hosts.truncate(limit); }
+        hosts
+    }
+    pub fn clear_recents(&mut self) {
+        for host in &mut self.hosts { host.last_connected_at.clear(); }
+    }
+    pub fn remove(&mut self, id: &str) -> bool {
+        let old_len = self.hosts.len();
+        self.hosts.retain(|host| host.id != id);
+        old_len != self.hosts.len()
+    }
+    pub fn folder(&self, id: &str) -> Option<&Folder> {
+        if id.is_empty() { return None; }
+        self.folders.iter().find(|folder| folder.id == id)
+    }
+    fn normalized_parent(&self, folder: &Folder) -> String {
+        if self.folder(&folder.parent).is_none() { return String::new(); }
+        let mut current = folder.parent.as_str();
+        for _ in 0..=self.folders.len() {
+            if current == folder.id { return String::new(); }
+            match self.folder(current) {
+                Some(parent) => current = &parent.parent,
+                None => return String::new(),
+            }
+        }
+        String::new()
+    }
+    pub fn subfolders(&self, parent: &str) -> Vec<&Folder> {
+        self.folders.iter().filter(|folder| self.normalized_parent(folder) == parent).collect()
+    }
+    pub fn hosts_in(&self, folder: &str) -> Vec<&Host> {
+        self.hosts.iter().filter(|host| {
+            !host.deleted()
+                && self.folder(&host.folder).map(|f| f.id.as_str()).unwrap_or("") == folder
+        }).collect()
+    }
+    pub fn folder_path(&self, id: &str) -> Vec<&Folder> {
+        let mut path = Vec::new();
+        let mut current = id;
+        for _ in 0..=self.folders.len() {
+            let Some(folder) = self.folder(current) else { break };
+            path.push(folder);
+            let parent = self.normalized_parent(folder);
+            if parent.is_empty() || parent == current { break; }
+            current = self.folder(&parent).map(|f| f.id.as_str()).unwrap_or("");
+        }
+        path.reverse();
+        path
+    }
+    pub fn add_folder(&mut self, name: impl Into<String>, parent: impl Into<String>) -> String {
+        let id = format!("f{}-{}", now_millis(), ENTITY_ID.fetch_add(1, Ordering::Relaxed));
+        self.folders.push(Folder {
+            id: id.clone(), name: name.into(), parent: parent.into(), extra: Map::new(),
+        });
+        id
+    }
+    pub fn remove_folder(&mut self, id: &str) -> bool {
+        let Some(index) = self.folders.iter().position(|folder| folder.id == id) else {
+            return false;
+        };
+        let parent = self.normalized_parent(&self.folders[index]);
+        for folder in &mut self.folders {
+            if folder.parent == id { folder.parent = parent.clone(); }
+        }
+        for host in &mut self.hosts {
+            if host.folder == id { host.folder = parent.clone(); }
+        }
+        self.folders.remove(index);
+        true
     }
     pub fn mark_connected(&mut self, id: &str, timestamp: impl Into<String>) -> bool {
         if let Some(h) = self.host_mut(id) {
@@ -539,6 +633,42 @@ mod tests {
             store.host("h1").unwrap().last_connected_at,
             "2026-11-25T10:00:00Z"
         );
+    }
+
+    #[test]
+    fn host_defaults_recent_and_deleted_lifecycle_match_store_contract() {
+        let mut store = Store::default();
+        store.add(Host { id: "old".into(), last_connected_at: "2026-11-20T10:00:00Z".into(), ..Host::default() });
+        store.add(Host { id: "new".into(), last_connected_at: "2026-11-24T10:00:00Z".into(), ..Host::default() });
+        store.add(Host { id: "deleted".into(), deleted_at: "2026-11-25T10:00:00Z".into(), ..Host::default() });
+        assert_eq!(store.recent(1)[0].id, "new");
+        assert_eq!(store.deleted_hosts()[0].id, "deleted");
+        assert_eq!(store.host("new").unwrap().term_type_or_default(), DEFAULT_TERM_TYPE);
+        assert!(store.host("new").unwrap().monitor_enabled());
+        assert!(store.host("new").unwrap().remembers_password());
+        store.clear_recents();
+        assert!(store.recent(0).is_empty());
+        assert!(store.remove("old"));
+        assert!(!store.remove("missing"));
+    }
+
+    #[test]
+    fn nested_folder_operations_reparent_children_and_hosts_safely() {
+        let mut store = Store::default();
+        let parent = store.add_folder("Production", "");
+        let child = store.add_folder("Databases", parent.clone());
+        store.add(Host { id: "db".into(), folder: child.clone(), ..Host::default() });
+        assert_eq!(
+            store.folder_path(&child).iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            ["Production", "Databases"]
+        );
+        assert_eq!(store.hosts_in(&child).len(), 1);
+        assert!(store.remove_folder(&parent));
+        assert_eq!(store.folder(&child).unwrap().parent, "");
+        assert_eq!(store.host("db").unwrap().folder, "");
+        assert_eq!(store.subfolders("").len(), 1);
+        assert!(store.remove_folder(&child));
+        assert!(store.folders.is_empty());
     }
 
     #[test]
