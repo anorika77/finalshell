@@ -31,6 +31,38 @@ impl ConnectionHost {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileEntry {
+    id: u64,
+    name: String,
+    kind: &'static str,
+}
+
+impl FileEntry {
+    fn fixture() -> Vec<Self> {
+        (0..10_000_u64)
+            .map(|index| {
+                let id = index + 1;
+                let kind = match index % 3 {
+                    0 => "config",
+                    1 => "log",
+                    _ => "source",
+                };
+                let extension = match kind {
+                    "config" => "toml",
+                    "log" => "log",
+                    _ => "rs",
+                };
+                Self {
+                    id,
+                    name: format!("{}-file-{id:05}.{extension}", kind),
+                    kind,
+                }
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MonitorTab {
     Overview,
@@ -141,6 +173,10 @@ struct WorkspacePrototype {
     connection_filter: String,
     connection_list_state: ListState,
     selected_host_id: Option<u64>,
+    files: Vec<FileEntry>,
+    file_filter: String,
+    file_list_state: ListState,
+    selected_file_id: Option<u64>,
 }
 
 impl Default for WorkspacePrototype {
@@ -159,6 +195,11 @@ impl Default for WorkspacePrototype {
             connection_list_state: ListState::new(1_000, ListAlignment::Top, px(52.0))
                 .with_uniform_item_height(px(26.0)),
             selected_host_id: None,
+            files: FileEntry::fixture(),
+            file_filter: String::new(),
+            file_list_state: ListState::new(10_000, ListAlignment::Top, px(48.0))
+                .with_uniform_item_height(px(24.0)),
+            selected_file_id: None,
         }
     }
 }
@@ -192,6 +233,33 @@ impl WorkspacePrototype {
         self.connection_hosts
             .iter()
             .filter(|host| self.host_matches_filter(host))
+            .cloned()
+            .collect()
+    }
+
+    fn set_file_filter(&mut self, filter: &str) {
+        self.file_filter = filter.to_ascii_lowercase();
+        let count = self.filtered_files().len();
+        self.file_list_state
+            .reset_with_uniform_height(count, px(24.0));
+        if self.selected_file_id.is_some_and(|selected| {
+            !self
+                .files
+                .iter()
+                .any(|file| file.id == selected && self.file_matches_filter(file))
+        }) {
+            self.selected_file_id = None;
+        }
+    }
+
+    fn file_matches_filter(&self, file: &FileEntry) -> bool {
+        self.file_filter.is_empty() || file.kind == self.file_filter
+    }
+
+    fn filtered_files(&self) -> Vec<FileEntry> {
+        self.files
+            .iter()
+            .filter(|file| self.file_matches_filter(file))
             .cloned()
             .collect()
     }
@@ -454,7 +522,93 @@ impl Render for WorkspacePrototype {
                             .flex_1()
                             .child("Terminal workspace")
                             .child(render_pane_node(&self.root, self.focused_pane_id, cx))
-                            .child("10,000 mock files"),
+                            .child({
+                                let filtered_files = self.filtered_files();
+                                let visible_count = filtered_files.len();
+                                let selected_file_id = self.selected_file_id;
+                                let workspace = cx.entity().clone();
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .h(px(220.0))
+                                    .child(format!("Files · {visible_count} / 10,000"))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .child(
+                                                div()
+                                                    .id("file-filter-all")
+                                                    .debug_selector(|| "file-filter-all".to_string())
+                                                    .child(if self.file_filter.is_empty() {
+                                                        "[All]"
+                                                    } else {
+                                                        "All"
+                                                    })
+                                                    .on_click(cx.listener(|this, _event, _window, cx| {
+                                                        this.set_file_filter("");
+                                                        cx.notify();
+                                                    })),
+                                            )
+                                            .child(
+                                                div()
+                                                    .id("file-filter-logs")
+                                                    .debug_selector(|| "file-filter-logs".to_string())
+                                                    .child(if self.file_filter == "log" {
+                                                        "[Logs]"
+                                                    } else {
+                                                        "Logs"
+                                                    })
+                                                    .on_click(cx.listener(|this, _event, _window, cx| {
+                                                        this.set_file_filter("log");
+                                                        cx.notify();
+                                                    })),
+                                            )
+                                            .child(
+                                                div()
+                                                    .id("file-filter-configs")
+                                                    .debug_selector(|| "file-filter-configs".to_string())
+                                                    .child(if self.file_filter == "config" {
+                                                        "[Configs]"
+                                                    } else {
+                                                        "Configs"
+                                                    })
+                                                    .on_click(cx.listener(|this, _event, _window, cx| {
+                                                        this.set_file_filter("config");
+                                                        cx.notify();
+                                                    })),
+                                            ),
+                                    )
+                                    .child(
+                                        list(
+                                            self.file_list_state.clone(),
+                                            move |ix, _window, _app| {
+                                                let file = filtered_files[ix].clone();
+                                                let selected = selected_file_id == Some(file.id);
+                                                let workspace = workspace.clone();
+                                                div()
+                                                    .id(format!("file-entry-{}", file.id))
+                                                    .debug_selector(move || {
+                                                        format!("file-entry-{}", file.id)
+                                                    })
+                                                    .h(px(24.0))
+                                                    .px_1()
+                                                    .child(if selected {
+                                                        format!("▶ {}", file.name)
+                                                    } else {
+                                                        file.name
+                                                    })
+                                                    .on_click(move |_event, _window, app| {
+                                                        workspace.update(app, |this, cx| {
+                                                            this.selected_file_id = Some(file.id);
+                                                            cx.notify();
+                                                        });
+                                                    })
+                                                    .into_any_element()
+                                            },
+                                        )
+                                        .flex_1(),
+                                    )
+                            }),
                     )
                     .child(
                         div()
@@ -751,6 +905,93 @@ mod tests {
         assert_eq!(app.selected_host_id, Some(host_id));
         assert_eq!(filtered_index, 1);
         assert_eq!(filtered[filtered_index].id, host_id);
+    }
+
+    #[test]
+    fn file_list_filters_and_preserves_selection_by_file_id() {
+        let mut app = WorkspacePrototype::default();
+        assert_eq!(app.files.len(), 10_000);
+
+        app.selected_file_id = Some(4);
+        app.set_file_filter("log");
+        let logs = app.filtered_files();
+        assert_eq!(logs.len(), 3_333);
+        assert!(logs.iter().all(|file| file.kind == "log"));
+        assert_eq!(app.selected_file_id, None);
+
+        app.set_file_filter("");
+        app.selected_file_id = Some(4);
+        app.set_file_filter("config");
+        let configs = app.filtered_files();
+        assert_eq!(configs.len(), 3_334);
+        assert!(configs.iter().all(|file| file.kind == "config"));
+        assert_eq!(app.selected_file_id, Some(4));
+    }
+
+    #[test]
+    fn file_selection_uses_stable_identity_after_filtering() {
+        let mut app = WorkspacePrototype::default();
+        app.selected_file_id = Some(4);
+        app.set_file_filter("config");
+        let filtered = app.filtered_files();
+        let selected_index = filtered
+            .iter()
+            .position(|file| file.id == 4)
+            .expect("selected config file should remain visible");
+        assert_eq!(selected_index, 1);
+        assert_eq!(filtered[selected_index].id, 4);
+        assert_eq!(app.selected_file_id, Some(4));
+    }
+
+    #[gpui::test]
+    fn headless_ui_file_filters_and_selection_are_interactive(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        workspace.update(cx, |workspace, _| {
+            workspace.selected_file_id = Some(4);
+        });
+
+        let logs_filter = cx
+            .debug_bounds("file-filter-logs")
+            .expect("logs filter should have rendered bounds");
+        cx.simulate_click(logs_filter.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.file_filter, "log");
+            assert_eq!(workspace.selected_file_id, None);
+            assert_eq!(workspace.filtered_files().len(), 3_333);
+        });
+
+        let all_filter = cx
+            .debug_bounds("file-filter-all")
+            .expect("all files filter should have rendered bounds");
+        cx.simulate_click(all_filter.center(), Modifiers::default());
+
+        let file_bounds = cx
+            .debug_bounds("file-entry-4")
+            .expect("file 4 should be rendered in the virtualized list");
+        cx.simulate_click(file_bounds.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.selected_file_id, Some(4));
+        });
+
+        let configs_filter = cx
+            .debug_bounds("file-filter-configs")
+            .expect("configs filter should have rendered bounds");
+        cx.simulate_click(configs_filter.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.file_filter, "config");
+            assert_eq!(workspace.selected_file_id, Some(4));
+            assert_eq!(workspace.filtered_files().len(), 3_334);
+        });
+
+        let logs_filter = cx
+            .debug_bounds("file-filter-logs")
+            .expect("logs filter should remain interactive");
+        cx.simulate_click(logs_filter.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.file_filter, "log");
+            assert_eq!(workspace.selected_file_id, None);
+        });
     }
 
     #[test]
