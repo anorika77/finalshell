@@ -708,7 +708,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{ListOffset, Modifiers, TestApp, TestAppContext};
+    use gpui::{ListOffset, Modifiers, MouseButton, TestApp, TestAppContext, point};
 
     #[test]
     fn monitor_tabs_select_the_matching_panel_content() {
