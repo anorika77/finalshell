@@ -1136,7 +1136,10 @@ mod tests {
         workspace.read_with(cx, |workspace, _| {
             let panes = workspace.panes();
             assert_eq!(panes.len(), 2);
-            assert_eq!(panes.iter().map(|pane| pane.pane_id).collect::<Vec<_>>(), [1, 2]);
+            assert_eq!(
+                panes.iter().map(|pane| pane.pane_id).collect::<Vec<_>>(),
+                [1, 2]
+            );
             assert!(panes.iter().all(|pane| pane.session_id == 101));
             assert!(workspace.session_is_active(101));
             assert_eq!(workspace.sessions.len(), 1);
