@@ -1168,4 +1168,118 @@ mod tests {
         assert_eq!(connection_ids.len(), 1_000);
         assert_eq!(file_ids.len(), 10_000);
     }
+
+    #[test]
+    fn pane_ids_remain_monotonic_after_close_and_resplit() {
+        let mut app = WorkspacePrototype::default();
+
+        app.split_focused(SplitAxis::Horizontal);
+        assert_eq!(app.panes().iter().map(|pane| pane.pane_id).collect::<Vec<_>>(), [1, 2]);
+
+        assert!(app.close_focused());
+        app.split_focused(SplitAxis::Vertical);
+
+        assert_eq!(app.panes().iter().map(|pane| pane.pane_id).collect::<Vec<_>>(), [1, 3]);
+        assert_eq!(app.next_pane_id, 4);
+        assert_eq!(app.focused_pane_id, 3);
+    }
+
+    #[test]
+    fn removing_nested_leaf_preserves_the_other_split_branch() {
+        let mut app = WorkspacePrototype::default();
+        app.split_focused(SplitAxis::Horizontal);
+        app.split_focused(SplitAxis::Vertical);
+
+        assert!(app.close_focused());
+
+        assert!(matches!(
+            app.root,
+            PaneNode::Split {
+                axis: SplitAxis::Horizontal,
+                ..
+            }
+        ));
+        assert_eq!(app.panes().iter().map(|pane| pane.pane_id).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(app.focused_pane_id, 1);
+        assert_eq!(app.sessions, BTreeSet::from([101]));
+    }
+
+    #[test]
+    fn connection_filter_is_case_insensitive_and_resets_virtual_scroll() {
+        let mut app = WorkspacePrototype::default();
+        app.selected_host_id = Some(901);
+        app.connection_list_state.scroll_to(ListOffset {
+            item_ix: 900,
+            offset_in_item: px(0.0),
+        });
+
+        app.set_connection_filter("DATABASE");
+
+        let filtered = app.filtered_connection_hosts();
+        assert_eq!(app.connection_filter, "database");
+        assert_eq!(filtered.len(), 333);
+        assert!(filtered.iter().all(|host| host.group == "database"));
+        assert_eq!(app.selected_host_id, None);
+        assert_eq!(app.connection_list_state.logical_scroll_top().item_ix, 0);
+
+        app.set_connection_filter("no-such-host");
+        assert!(app.filtered_connection_hosts().is_empty());
+        assert_eq!(app.connection_list_state.logical_scroll_top().item_ix, 0);
+    }
+
+    #[test]
+    fn file_filter_handles_unknown_categories_and_clears_stale_selection() {
+        let mut app = WorkspacePrototype::default();
+        app.selected_file_id = Some(9_001);
+        app.file_list_state.scroll_to(ListOffset {
+            item_ix: 9_000,
+            offset_in_item: px(0.0),
+        });
+
+        app.set_file_filter("UNKNOWN");
+
+        assert_eq!(app.file_filter, "unknown");
+        assert!(app.filtered_files().is_empty());
+        assert_eq!(app.selected_file_id, None);
+        assert_eq!(app.file_list_state.logical_scroll_top().item_ix, 0);
+    }
+
+    #[gpui::test]
+    fn headless_ui_focus_and_close_preserve_unfocused_split_branch(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        let horizontal_split = cx
+            .debug_bounds("split-horizontal")
+            .expect("horizontal split control should be rendered");
+        cx.simulate_click(horizontal_split.center(), Modifiers::default());
+
+        let vertical_split = cx
+            .debug_bounds("split-vertical")
+            .expect("vertical split control should be rendered");
+        cx.simulate_click(vertical_split.center(), Modifiers::default());
+
+        let second_pane = cx
+            .debug_bounds("pane-2")
+            .expect("second pane should be rendered");
+        cx.simulate_click(second_pane.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.focused_pane_id, 2);
+        });
+
+        let close_button = cx
+            .debug_bounds("close-pane")
+            .expect("close control should be rendered");
+        cx.simulate_click(close_button.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(
+                workspace.panes().iter().map(|pane| pane.pane_id).collect::<Vec<_>>(),
+                [1, 3]
+            );
+            assert_eq!(workspace.focused_pane_id, 1);
+            assert!(workspace.panes().iter().all(|pane| pane.session_id == 101));
+            assert!(workspace.session_is_active(101));
+        });
+    }
+
 }
