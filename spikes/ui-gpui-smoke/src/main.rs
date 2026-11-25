@@ -1174,12 +1174,24 @@ mod tests {
         let mut app = WorkspacePrototype::default();
 
         app.split_focused(SplitAxis::Horizontal);
-        assert_eq!(app.panes().iter().map(|pane| pane.pane_id).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(
+            app.panes()
+                .iter()
+                .map(|pane| pane.pane_id)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
 
         assert!(app.close_focused());
         app.split_focused(SplitAxis::Vertical);
 
-        assert_eq!(app.panes().iter().map(|pane| pane.pane_id).collect::<Vec<_>>(), [1, 3]);
+        assert_eq!(
+            app.panes()
+                .iter()
+                .map(|pane| pane.pane_id)
+                .collect::<Vec<_>>(),
+            [1, 3]
+        );
         assert_eq!(app.next_pane_id, 4);
         assert_eq!(app.focused_pane_id, 3);
     }
@@ -1273,7 +1285,11 @@ mod tests {
 
         workspace.read_with(cx, |workspace, _| {
             assert_eq!(
-                workspace.panes().iter().map(|pane| pane.pane_id).collect::<Vec<_>>(),
+                workspace
+                    .panes()
+                    .iter()
+                    .map(|pane| pane.pane_id)
+                    .collect::<Vec<_>>(),
                 [1, 3]
             );
             assert_eq!(workspace.focused_pane_id, 1);
@@ -1281,5 +1297,4 @@ mod tests {
             assert!(workspace.session_is_active(101));
         });
     }
-
 }
