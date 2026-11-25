@@ -8,3 +8,4 @@ repository = "https://github.com/anorika77/finalshell"
 publish = false
 
 [dependencies]
+serde_json = "=1.0.154"
