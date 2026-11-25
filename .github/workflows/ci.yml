@@ -52,12 +52,6 @@ jobs:
           cargo --version
           rustc -vV
 
-      - name: Emit rustfmt-normalized config source
-        if: matrix.name == 'Linux x86_64'
-        run: |
-          cargo fmt --all
-          cat src/config.rs
-
       - name: Format check
         run: cargo fmt --all -- --check
 
