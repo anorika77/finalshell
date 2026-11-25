@@ -388,6 +388,7 @@ impl Render for WorkspacePrototype {
                     .child(
                         div()
                             .id("split-horizontal")
+                            .debug_selector(|| "split-horizontal".to_string())
                             .w(px(110.0))
                             .h(px(32.0))
                             .child("  [Split H]  ")
