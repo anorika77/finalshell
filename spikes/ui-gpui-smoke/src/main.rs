@@ -538,44 +538,56 @@ impl Render for WorkspacePrototype {
                                             .child(
                                                 div()
                                                     .id("file-filter-all")
-                                                    .debug_selector(|| "file-filter-all".to_string())
+                                                    .debug_selector(|| {
+                                                        "file-filter-all".to_string()
+                                                    })
                                                     .child(if self.file_filter.is_empty() {
                                                         "[All]"
                                                     } else {
                                                         "All"
                                                     })
-                                                    .on_click(cx.listener(|this, _event, _window, cx| {
-                                                        this.set_file_filter("");
-                                                        cx.notify();
-                                                    })),
+                                                    .on_click(cx.listener(
+                                                        |this, _event, _window, cx| {
+                                                            this.set_file_filter("");
+                                                            cx.notify();
+                                                        },
+                                                    )),
                                             )
                                             .child(
                                                 div()
                                                     .id("file-filter-logs")
-                                                    .debug_selector(|| "file-filter-logs".to_string())
+                                                    .debug_selector(|| {
+                                                        "file-filter-logs".to_string()
+                                                    })
                                                     .child(if self.file_filter == "log" {
                                                         "[Logs]"
                                                     } else {
                                                         "Logs"
                                                     })
-                                                    .on_click(cx.listener(|this, _event, _window, cx| {
-                                                        this.set_file_filter("log");
-                                                        cx.notify();
-                                                    })),
+                                                    .on_click(cx.listener(
+                                                        |this, _event, _window, cx| {
+                                                            this.set_file_filter("log");
+                                                            cx.notify();
+                                                        },
+                                                    )),
                                             )
                                             .child(
                                                 div()
                                                     .id("file-filter-configs")
-                                                    .debug_selector(|| "file-filter-configs".to_string())
+                                                    .debug_selector(|| {
+                                                        "file-filter-configs".to_string()
+                                                    })
                                                     .child(if self.file_filter == "config" {
                                                         "[Configs]"
                                                     } else {
                                                         "Configs"
                                                     })
-                                                    .on_click(cx.listener(|this, _event, _window, cx| {
-                                                        this.set_file_filter("config");
-                                                        cx.notify();
-                                                    })),
+                                                    .on_click(cx.listener(
+                                                        |this, _event, _window, cx| {
+                                                            this.set_file_filter("config");
+                                                            cx.notify();
+                                                        },
+                                                    )),
                                             ),
                                     )
                                     .child(
