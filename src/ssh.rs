@@ -87,7 +87,9 @@ impl std::fmt::Display for SshError {
             }
             Self::AuthenticationRejected => write!(f, "SSH authentication rejected"),
             Self::HostKeyConfirmationRejected => write!(f, "SSH host key was rejected by the user"),
-            Self::HostKeyConfirmationUnavailable => write!(f, "SSH host key confirmation UI is unavailable"),
+            Self::HostKeyConfirmationUnavailable => {
+                write!(f, "SSH host key confirmation UI is unavailable")
+            },
             Self::HostKeyConfirmationTimeout => write!(f, "SSH host key confirmation timed out"),
             Self::MissingCredentials => write!(f, "SSH credentials are missing"),
             Self::UnsupportedAuthentication(kind) => {
@@ -161,7 +163,10 @@ impl Handler for HostKeyVerifier {
                         .to_string(),
                     reply,
                 };
-                sender.send(prompt).await.map_err(|_| SshError::HostKeyConfirmationUnavailable)?;
+                sender
+                    .send(prompt)
+                    .await
+                    .map_err(|_| SshError::HostKeyConfirmationUnavailable)?;
                 let accepted = tokio::time::timeout(self.prompt_timeout, response)
                     .await
                     .map_err(|_| SshError::HostKeyConfirmationTimeout)?
