@@ -21,7 +21,11 @@ pub enum ConfigError {
 }
 impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self { Self::Io(e) => write!(f, "{e}"), Self::Json(e) => write!(f, "{e}") }
+        match self {
+            Self::Io(e) => write!(f, "{e}"),
+            Self::Json(e) => write!(f, "{e}"),
+            Self::InvalidFormat(e) => write!(f, "{e}"),
+        }
     }
 }
 impl std::error::Error for ConfigError {}
