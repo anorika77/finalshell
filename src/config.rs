@@ -275,10 +275,18 @@ impl Host {
         !self.deleted_at.is_empty()
     }
     pub fn term_type_or_default(&self) -> &str {
-        if self.term_type.is_empty() { DEFAULT_TERM_TYPE } else { &self.term_type }
+        if self.term_type.is_empty() {
+            DEFAULT_TERM_TYPE
+        } else {
+            &self.term_type
+        }
     }
-    pub fn monitor_enabled(&self) -> bool { !self.no_monitor }
-    pub fn remembers_password(&self) -> bool { !self.no_remember_password }
+    pub fn monitor_enabled(&self) -> bool {
+        !self.no_monitor
+    }
+    pub fn remembers_password(&self) -> bool {
+        !self.no_remember_password
+    }
     pub fn clone_with_id(&self, id: impl Into<String>) -> Self {
         let mut cloned = self.clone();
         cloned.id = id.into();
@@ -400,7 +408,11 @@ impl Store {
     }
     pub fn add(&mut self, mut host: Host) {
         if host.id.is_empty() {
-            host.id = format!("h{}-{}", now_millis(), ENTITY_ID.fetch_add(1, Ordering::Relaxed));
+            host.id = format!(
+                "h{}-{}",
+                now_millis(),
+                ENTITY_ID.fetch_add(1, Ordering::Relaxed)
+            );
         }
         self.hosts.push(host);
     }
@@ -413,14 +425,21 @@ impl Store {
         hosts
     }
     pub fn recent(&self, limit: usize) -> Vec<&Host> {
-        let mut hosts: Vec<_> = self.hosts.iter()
-            .filter(|h| !h.deleted() && !h.last_connected_at.is_empty()).collect();
+        let mut hosts: Vec<_> = self
+            .hosts
+            .iter()
+            .filter(|h| !h.deleted() && !h.last_connected_at.is_empty())
+            .collect();
         hosts.sort_by(|a, b| b.last_connected_at.cmp(&a.last_connected_at));
-        if limit > 0 { hosts.truncate(limit); }
+        if limit > 0 {
+            hosts.truncate(limit);
+        }
         hosts
     }
     pub fn clear_recents(&mut self) {
-        for host in &mut self.hosts { host.last_connected_at.clear(); }
+        for host in &mut self.hosts {
+            host.last_connected_at.clear();
+        }
     }
     pub fn remove(&mut self, id: &str) -> bool {
         let old_len = self.hosts.len();
@@ -428,15 +447,22 @@ impl Store {
         old_len != self.hosts.len()
     }
     pub fn folder(&self, id: &str) -> Option<&Folder> {
-        if id.is_empty() { return None; }
+        if id.is_empty() {
+            return None;
+        }
         self.folders.iter().find(|folder| folder.id == id)
     }
     fn normalized_parent(&self, folder: &Folder) -> String {
-        if self.folder(&folder.parent).is_none() { return String::new(); }
+        if self.folder(&folder.parent).is_none() {
+            return String::new();
+        }
         let mut current = folder.parent.as_str();
         for _ in 0..=self.folders.len() {
-            if current == folder.id { return String::new(); }
+            if current == folder.id {
+                return String::new();
+            }
             match self.folder(current) {
+                Some(parent) if parent.parent.is_empty() => return folder.parent.clone(),
                 Some(parent) => current = &parent.parent,
                 None => return String::new(),
             }
@@ -444,31 +470,52 @@ impl Store {
         String::new()
     }
     pub fn subfolders(&self, parent: &str) -> Vec<&Folder> {
-        self.folders.iter().filter(|folder| self.normalized_parent(folder) == parent).collect()
+        self.folders
+            .iter()
+            .filter(|folder| self.normalized_parent(folder) == parent)
+            .collect()
     }
     pub fn hosts_in(&self, folder: &str) -> Vec<&Host> {
-        self.hosts.iter().filter(|host| {
-            !host.deleted()
-                && self.folder(&host.folder).map(|f| f.id.as_str()).unwrap_or("") == folder
-        }).collect()
+        self.hosts
+            .iter()
+            .filter(|host| {
+                !host.deleted()
+                    && self
+                        .folder(&host.folder)
+                        .map(|f| f.id.as_str())
+                        .unwrap_or("")
+                        == folder
+            })
+            .collect()
     }
     pub fn folder_path(&self, id: &str) -> Vec<&Folder> {
         let mut path = Vec::new();
         let mut current = id;
         for _ in 0..=self.folders.len() {
-            let Some(folder) = self.folder(current) else { break };
+            let Some(folder) = self.folder(current) else {
+                break;
+            };
             path.push(folder);
             let parent = self.normalized_parent(folder);
-            if parent.is_empty() || parent == current { break; }
+            if parent.is_empty() || parent == current {
+                break;
+            }
             current = self.folder(&parent).map(|f| f.id.as_str()).unwrap_or("");
         }
         path.reverse();
         path
     }
     pub fn add_folder(&mut self, name: impl Into<String>, parent: impl Into<String>) -> String {
-        let id = format!("f{}-{}", now_millis(), ENTITY_ID.fetch_add(1, Ordering::Relaxed));
+        let id = format!(
+            "f{}-{}",
+            now_millis(),
+            ENTITY_ID.fetch_add(1, Ordering::Relaxed)
+        );
         self.folders.push(Folder {
-            id: id.clone(), name: name.into(), parent: parent.into(), extra: Map::new(),
+            id: id.clone(),
+            name: name.into(),
+            parent: parent.into(),
+            extra: Map::new(),
         });
         id
     }
@@ -478,10 +525,14 @@ impl Store {
         };
         let parent = self.normalized_parent(&self.folders[index]);
         for folder in &mut self.folders {
-            if folder.parent == id { folder.parent = parent.clone(); }
+            if folder.parent == id {
+                folder.parent = parent.clone();
+            }
         }
         for host in &mut self.hosts {
-            if host.folder == id { host.folder = parent.clone(); }
+            if host.folder == id {
+                host.folder = parent.clone();
+            }
         }
         self.folders.remove(index);
         true
@@ -638,12 +689,27 @@ mod tests {
     #[test]
     fn host_defaults_recent_and_deleted_lifecycle_match_store_contract() {
         let mut store = Store::default();
-        store.add(Host { id: "old".into(), last_connected_at: "2026-11-20T10:00:00Z".into(), ..Host::default() });
-        store.add(Host { id: "new".into(), last_connected_at: "2026-11-24T10:00:00Z".into(), ..Host::default() });
-        store.add(Host { id: "deleted".into(), deleted_at: "2026-11-25T10:00:00Z".into(), ..Host::default() });
+        store.add(Host {
+            id: "old".into(),
+            last_connected_at: "2026-11-20T10:00:00Z".into(),
+            ..Host::default()
+        });
+        store.add(Host {
+            id: "new".into(),
+            last_connected_at: "2026-11-24T10:00:00Z".into(),
+            ..Host::default()
+        });
+        store.add(Host {
+            id: "deleted".into(),
+            deleted_at: "2026-11-25T10:00:00Z".into(),
+            ..Host::default()
+        });
         assert_eq!(store.recent(1)[0].id, "new");
         assert_eq!(store.deleted_hosts()[0].id, "deleted");
-        assert_eq!(store.host("new").unwrap().term_type_or_default(), DEFAULT_TERM_TYPE);
+        assert_eq!(
+            store.host("new").unwrap().term_type_or_default(),
+            DEFAULT_TERM_TYPE
+        );
         assert!(store.host("new").unwrap().monitor_enabled());
         assert!(store.host("new").unwrap().remembers_password());
         store.clear_recents();
@@ -657,9 +723,17 @@ mod tests {
         let mut store = Store::default();
         let parent = store.add_folder("Production", "");
         let child = store.add_folder("Databases", parent.clone());
-        store.add(Host { id: "db".into(), folder: child.clone(), ..Host::default() });
+        store.add(Host {
+            id: "db".into(),
+            folder: child.clone(),
+            ..Host::default()
+        });
         assert_eq!(
-            store.folder_path(&child).iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            store
+                .folder_path(&child)
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>(),
             ["Production", "Databases"]
         );
         assert_eq!(store.hosts_in(&child).len(), 1);
