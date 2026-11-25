@@ -1,6 +1,5 @@
 use std::{
     fs::{self, File, OpenOptions},
-
     io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -41,10 +40,15 @@ impl From<serde_json::Error> for ConfigError {
 }
 
 fn object(value: Value) -> Map<String, Value> {
-    match value { Value::Object(m) => m, _ => Map::new() }
+    match value {
+        Value::Object(m) => m,
+        _ => Map::new(),
+    }
 }
 fn take_string(m: &mut Map<String, Value>, key: &str) -> String {
-    m.remove(key).and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+    m.remove(key)
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
 }
 fn take_u64(m: &mut Map<String, Value>, key: &str) -> u64 {
     m.remove(key).and_then(|v| v.as_u64()).unwrap_or_default()
@@ -61,13 +65,19 @@ fn take_strings(m: &mut Map<String, Value>, key: &str) -> Vec<String> {
         .collect()
 }
 fn put_string(m: &mut Map<String, Value>, key: &str, value: &str) {
-    if !value.is_empty() { m.insert(key.into(), Value::String(value.into())); }
+    if !value.is_empty() {
+        m.insert(key.into(), Value::String(value.into()));
+    }
 }
 fn put_bool(m: &mut Map<String, Value>, key: &str, value: bool) {
-    if value { m.insert(key.into(), Value::Bool(true)); }
+    if value {
+        m.insert(key.into(), Value::Bool(true));
+    }
 }
 fn put_number(m: &mut Map<String, Value>, key: &str, value: u64) {
-    if value != 0 { m.insert(key.into(), Value::from(value)); }
+    if value != 0 {
+        m.insert(key.into(), Value::from(value));
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -247,15 +257,14 @@ impl Host {
         }
     }
     pub fn port_or_22(&self) -> u16 {
-        if self.port == 0 {
-            22
-        } else {
-            self.port
-        }
+        if self.port == 0 { 22 } else { self.port }
     }
     pub fn target(&self) -> String {
-        if self.port_or_22() == 22 { format!("{}@{}", self.user, self.addr) }
-        else { format!("{}@{}:{}", self.user, self.addr, self.port_or_22()) }
+        if self.port_or_22() == 22 {
+            format!("{}@{}", self.user, self.addr)
+        } else {
+            format!("{}@{}:{}", self.user, self.addr, self.port_or_22())
+        }
     }
     pub fn deleted(&self) -> bool {
         !self.deleted_at.is_empty()
@@ -323,9 +332,29 @@ impl Store {
             )),
             Value::Object(mut m) => {
                 let version = take_u64(&mut m, "version").max(HOSTS_VERSION);
-                let folders = m.remove("folders").and_then(|v| v.as_array().cloned()).unwrap_or_default().into_iter().map(Folder::from_value).collect();
-                let hosts = m.remove("hosts").and_then(|v| v.as_array().cloned()).unwrap_or_default().into_iter().map(Host::from_value).collect();
-                Ok((Self { version, folders, hosts, extra: m }, false))
+                let folders = m
+                    .remove("folders")
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(Folder::from_value)
+                    .collect();
+                let hosts = m
+                    .remove("hosts")
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(Host::from_value)
+                    .collect();
+                Ok((
+                    Self {
+                        version,
+                        folders,
+                        hosts,
+                        extra: m,
+                    },
+                    false,
+                ))
             }
             _ => Err(ConfigError::InvalidFormat(
                 "hosts.json must be an array or object".into(),
@@ -355,18 +384,39 @@ impl Store {
         self.hosts.iter_mut().find(|h| h.id == id)
     }
     pub fn add(&mut self, mut host: Host) {
-        if host.id.is_empty() { host.id = format!("h{}", now_millis()); }
+        if host.id.is_empty() {
+            host.id = format!("h{}", now_millis());
+        }
         self.hosts.push(host);
     }
-    pub fn live(&self) -> Vec<&Host> { self.hosts.iter().filter(|h| !h.deleted()).collect() }
+    pub fn live(&self) -> Vec<&Host> {
+        self.hosts.iter().filter(|h| !h.deleted()).collect()
+    }
     pub fn mark_connected(&mut self, id: &str, timestamp: impl Into<String>) -> bool {
-        if let Some(h) = self.host_mut(id) { h.last_connected_at = timestamp.into(); true } else { false }
+        if let Some(h) = self.host_mut(id) {
+            h.last_connected_at = timestamp.into();
+            true
+        } else {
+            false
+        }
     }
     pub fn soft_delete(&mut self, id: &str, timestamp: impl Into<String>) -> bool {
-        if let Some(h) = self.host_mut(id) { if !h.deleted() { h.deleted_at = timestamp.into(); } true } else { false }
+        if let Some(h) = self.host_mut(id) {
+            if !h.deleted() {
+                h.deleted_at = timestamp.into();
+            }
+            true
+        } else {
+            false
+        }
     }
     pub fn restore(&mut self, id: &str) -> bool {
-        if let Some(h) = self.host_mut(id) { h.deleted_at.clear(); true } else { false }
+        if let Some(h) = self.host_mut(id) {
+            h.deleted_at.clear();
+            true
+        } else {
+            false
+        }
     }
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let path = path.as_ref();
