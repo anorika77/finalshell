@@ -329,6 +329,7 @@ fn render_pane_node(
             let focused = pane_id == focused_pane_id;
             div()
                 .id(format!("pane-{pane_id}"))
+                .debug_selector(move || format!("pane-{pane_id}"))
                 .flex()
                 .flex_1()
                 .p_2()
@@ -409,6 +410,7 @@ impl Render for WorkspacePrototype {
                     .child(
                         div()
                             .id("close-pane")
+                            .debug_selector(|| "close-pane".to_string())
                             .w(px(110.0))
                             .h(px(32.0))
                             .child("[Close focused]")
@@ -706,7 +708,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{ListOffset, Modifiers, MouseButton, TestApp, TestAppContext, point};
+    use gpui::{ListOffset, Modifiers, TestApp, TestAppContext};
 
     #[test]
     fn monitor_tabs_select_the_matching_panel_content() {
@@ -1028,6 +1030,84 @@ mod tests {
             assert_eq!(offset.item_ix, 9_000);
             assert_eq!(workspace.selected_file_id, Some(9_001));
         });
+    }
+
+    #[gpui::test]
+    fn headless_ui_connection_tree_scrolls_to_distant_hosts(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.connection_list_state.scroll_to(ListOffset {
+                item_ix: 900,
+                offset_in_item: px(0.0),
+            });
+            cx.notify();
+        });
+
+        let distant_host = cx
+            .debug_bounds("connection-host-901")
+            .expect("host 901 should render after scrolling to its virtualized range");
+        cx.simulate_click(distant_host.center(), gpui::Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            let offset = workspace.connection_list_state.logical_scroll_top();
+            assert_eq!(offset.item_ix, 900);
+            assert_eq!(workspace.selected_host_id, Some(901));
+        });
+    }
+
+    #[gpui::test]
+    fn headless_ui_pane_focus_and_close_preserve_session_lifecycle(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        let split_button = cx
+            .debug_bounds("split-horizontal")
+            .expect("horizontal split button should be rendered");
+        cx.simulate_click(split_button.center(), gpui::Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.root.leaf_count(), 2);
+            assert_eq!(workspace.sessions.len(), 1);
+            assert_eq!(workspace.focused_pane_id, 2);
+        });
+
+        let first_pane = cx
+            .debug_bounds("pane-1")
+            .expect("first pane should be rendered");
+        cx.simulate_click(first_pane.center(), gpui::Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.focused_pane_id, 1);
+        });
+
+        let close_button = cx
+            .debug_bounds("close-pane")
+            .expect("close button should be rendered");
+        cx.simulate_click(close_button.center(), gpui::Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            let panes = workspace.panes();
+            assert_eq!(panes.len(), 1);
+            assert_eq!(panes[0].pane_id, 2);
+            assert_eq!(panes[0].session_id, 101);
+            assert!(workspace.session_is_active(101));
+            assert_eq!(workspace.sessions.len(), 1);
+        });
+    }
+
+    #[test]
+    fn filtering_a_scrolled_file_list_resets_its_virtual_window() {
+        let mut app = WorkspacePrototype::default();
+        app.file_list_state.scroll_to(ListOffset {
+            item_ix: 9_000,
+            offset_in_item: px(0.0),
+        });
+        assert_eq!(app.file_list_state.logical_scroll_top().item_ix, 9_000);
+
+        app.set_file_filter("log");
+
+        assert_eq!(app.filtered_files().len(), 3_333);
+        assert_eq!(app.file_list_state.logical_scroll_top().item_ix, 0);
     }
 
     #[test]
