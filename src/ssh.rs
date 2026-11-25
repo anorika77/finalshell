@@ -99,7 +99,7 @@ impl Handler for HostKeyVerifier {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &ssh_key::PublicKey,
+        server_public_key: &keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         let known = known_hosts::known_host_keys_path(
             &self.host,
@@ -270,7 +270,7 @@ fn expand_home(path: PathBuf) -> PathBuf {
             .or_else(|| std::env::var_os("USERPROFILE"))
             .map(PathBuf::from);
         if let Some(home) = home {
-            return home.join(text[1..].trim_start_matches(['/', '\\\\']));
+            return home.join(text[1..].trim_start_matches('/').trim_start_matches('\\'));
         }
     }
     path
