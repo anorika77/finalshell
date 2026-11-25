@@ -371,6 +371,7 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("connection-filter-all")
+                                            .debug_selector(|| "connection-filter-all".to_string())
                                             .child(if self.connection_filter.is_empty() {
                                                 "[All]"
                                             } else {
@@ -384,6 +385,7 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("connection-filter-production")
+                                            .debug_selector(|| "connection-filter-production".to_string())
                                             .child(if self.connection_filter == "production" {
                                                 "[Prod]"
                                             } else {
@@ -397,6 +399,7 @@ impl Render for WorkspacePrototype {
                                     .child(
                                         div()
                                             .id("connection-filter-database")
+                                            .debug_selector(|| "connection-filter-database".to_string())
                                             .child(if self.connection_filter == "database" {
                                                 "[DB]"
                                             } else {
@@ -417,6 +420,7 @@ impl Render for WorkspacePrototype {
                                         let workspace = workspace.clone();
                                         div()
                                             .id(format!("connection-host-{}", host.id))
+                                            .debug_selector(move || format!("connection-host-{}", host.id))
                                             .h(px(26.0))
                                             .px_1()
                                             .child(if selected {
@@ -640,6 +644,63 @@ mod tests {
             assert_eq!(workspace.root.leaf_count(), 2);
             assert_eq!(workspace.sessions.len(), 1);
             assert!(workspace.session_is_active(101));
+        });
+    }
+
+    #[gpui::test]
+    fn headless_ui_connection_filters_and_host_selection_are_interactive(
+        cx: &mut TestAppContext,
+    ) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        workspace.update(cx, |workspace, _| {
+            workspace.selected_host_id = Some(1);
+        });
+
+        let database_filter = cx
+            .debug_bounds("connection-filter-database")
+            .expect("database filter should have rendered bounds");
+        cx.simulate_click(database_filter.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.connection_filter, "database");
+            assert_eq!(workspace.selected_host_id, None);
+            assert_eq!(workspace.filtered_connection_hosts().len(), 333);
+        });
+
+        let all_filter = cx
+            .debug_bounds("connection-filter-all")
+            .expect("all filter should have rendered bounds");
+        cx.simulate_click(all_filter.center(), Modifiers::default());
+
+        let host_bounds = cx
+            .debug_bounds("connection-host-4")
+            .expect("production host 4 should be visible in the connection list");
+        cx.simulate_click(host_bounds.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.selected_host_id, Some(4));
+        });
+
+        let production_filter = cx
+            .debug_bounds("connection-filter-production")
+            .expect("production filter should have rendered bounds");
+        cx.simulate_click(production_filter.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.connection_filter, "production");
+            assert_eq!(workspace.selected_host_id, Some(4));
+            assert!(workspace.filtered_connection_hosts().iter().any(|host| host.id == 4));
+        });
+
+        let database_filter = cx
+            .debug_bounds("connection-filter-database")
+            .expect("database filter should remain interactive");
+        cx.simulate_click(database_filter.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.connection_filter, "database");
+            assert_eq!(workspace.selected_host_id, None);
         });
     }
 
