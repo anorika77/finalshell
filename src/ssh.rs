@@ -89,7 +89,7 @@ impl std::fmt::Display for SshError {
             Self::HostKeyConfirmationRejected => write!(f, "SSH host key was rejected by the user"),
             Self::HostKeyConfirmationUnavailable => {
                 write!(f, "SSH host key confirmation UI is unavailable")
-            },
+            }
             Self::HostKeyConfirmationTimeout => write!(f, "SSH host key confirmation timed out"),
             Self::MissingCredentials => write!(f, "SSH credentials are missing"),
             Self::UnsupportedAuthentication(kind) => {
