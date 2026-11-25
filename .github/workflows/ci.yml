@@ -52,8 +52,11 @@ jobs:
           cargo --version
           rustc -vV
 
-      - name: Resolve SSH dependency lockfile
-        run: cargo generate-lockfile
+      - name: Resolve compatible SSH dependency lockfile
+        run: |
+          cargo generate-lockfile
+          cargo update -p rsa --precise 0.10.0-rc.10
+          cargo update -p pkcs1 --precise 0.8.0-rc.4
 
       - name: Print resolved SSH dependency lockfile
         if: matrix.name == 'Linux x86_64'
