@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use russh::{
     Channel, Disconnect,
     client::{self, Handler},
-    keys::{self, PrivateKeyWithHashAlg, agent::client::AgentClient, known_hosts},
+    keys::{self, PrivateKeyWithHashAlg, agent::{AgentIdentity, client::AgentClient}, known_hosts},
 };
 
 use crate::config::{AUTH_AGENT, AUTH_KEY, AUTH_PASSWORD, Host};
@@ -125,12 +125,13 @@ impl Handler for HostKeyVerifier {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &keys::PublicKey,
+        server_public_key: &keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        let server_public_key = server_public_key.public_key();
         let known = known_hosts::known_host_keys_path(&self.host, self.port, &self.path)
             .map_err(SshError::KnownHosts)?;
 
-        if known.iter().any(|(_, key)| key == server_public_key) {
+        if known.iter().any(|(_, key)| key == &server_public_key) {
             return Ok(true);
         }
 
@@ -334,19 +335,30 @@ async fn authenticate_agent(
         .await
         .map_err(SshError::Agent)?
         .dynamic();
+    if let Some(binding) = handle.agent_session_binding().cloned() {
+        agent
+            .bind_session(&binding, false)
+            .await
+            .map_err(SshError::Agent)?;
+    }
     let identities = agent.request_identities().await.map_err(SshError::Agent)?;
     if identities.is_empty() {
         return Err(SshError::AuthenticationRejected);
     }
 
-    for key in identities {
+    for identity in identities {
         let hash = handle.best_supported_rsa_hash().await?.flatten();
-        let result = handle
-            .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
-            .await
-            .map_err(|error| {
-                SshError::UnsupportedAuthentication(format!("SSH agent signing failed: {error}"))
-            })?;
+        let result = match identity {
+            AgentIdentity::PublicKey { key, .. } => handle
+                .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
+                .await,
+            AgentIdentity::Certificate { certificate, .. } => handle
+                .authenticate_certificate_with(user.to_owned(), certificate, hash, &mut agent)
+                .await,
+        }
+        .map_err(|error| {
+            SshError::UnsupportedAuthentication(format!("SSH agent signing failed: {error}"))
+        })?;
         if result.success() {
             return Ok(result);
         }
@@ -363,19 +375,30 @@ async fn authenticate_agent(
         .await
         .map_err(SshError::Agent)?
         .dynamic();
+    if let Some(binding) = handle.agent_session_binding().cloned() {
+        agent
+            .bind_session(&binding, false)
+            .await
+            .map_err(SshError::Agent)?;
+    }
     let identities = agent.request_identities().await.map_err(SshError::Agent)?;
     if identities.is_empty() {
         return Err(SshError::AuthenticationRejected);
     }
 
-    for key in identities {
+    for identity in identities {
         let hash = handle.best_supported_rsa_hash().await?.flatten();
-        let result = handle
-            .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
-            .await
-            .map_err(|error| {
-                SshError::UnsupportedAuthentication(format!("SSH agent signing failed: {error}"))
-            })?;
+        let result = match identity {
+            AgentIdentity::PublicKey { key, .. } => handle
+                .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
+                .await,
+            AgentIdentity::Certificate { certificate, .. } => handle
+                .authenticate_certificate_with(user.to_owned(), certificate, hash, &mut agent)
+                .await,
+        }
+        .map_err(|error| {
+            SshError::UnsupportedAuthentication(format!("SSH agent signing failed: {error}"))
+        })?;
         if result.success() {
             return Ok(result);
         }
