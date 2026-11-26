@@ -527,6 +527,8 @@ impl SshClient {
 
     /// Starts one configured tunnel by its zero-based position in Host.tunnels.
     pub async fn start_tunnel(&self, index: usize) -> Result<(), SshError> {
+        let handle = self.forwarding_handle();
+        let routes = self.remote_forward_routes.clone();
         let mut runs = self.tunnels.lock().await;
         let run = runs.get_mut(index).ok_or_else(|| {
             SshError::Proxy(format!("tunnel index {index} does not exist"))
@@ -534,11 +536,7 @@ impl SshClient {
         if run.handle.is_some() {
             return Ok(());
         }
-        match crate::forward::start_configured_tunnel(
-            self.forwarding_handle(),
-            self.remote_forward_routes.clone(),
-            &run.spec,
-        )
+        match crate::forward::start_configured_tunnel(handle, routes, &run.spec)
         .await
         {
             Ok(handle) => {

@@ -70,7 +70,7 @@ struct Counters {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TunnelStatus {
     pub spec: Tunnel,
     pub listening: bool,
