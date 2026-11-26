@@ -337,7 +337,10 @@ mod tests {
             remote_listen_ip("localhost").unwrap(),
             "127.0.0.1".parse::<std::net::IpAddr>().unwrap()
         );
-        assert_eq!(remote_listen_ip("::1").unwrap(), "::1".parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(
+            remote_listen_ip("::1").unwrap(),
+            "::1".parse::<std::net::IpAddr>().unwrap()
+        );
         assert!(remote_listen_ip("remote.example").is_err());
     }
 }
