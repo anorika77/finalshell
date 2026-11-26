@@ -12,6 +12,7 @@ pub const HOSTS_VERSION: u64 = 2;
 pub const AUTH_PASSWORD: &str = "password";
 pub const AUTH_KEY: &str = "key";
 pub const AUTH_AGENT: &str = "agent";
+pub const AUTH_KEYBOARD_INTERACTIVE: &str = "keyboard-interactive";
 pub const DEFAULT_TERM_TYPE: &str = "xterm-256color";
 pub const V1_BACKUP_NAME: &str = "hosts.v1.json";
 static TEMP_ID: AtomicU64 = AtomicU64::new(0);

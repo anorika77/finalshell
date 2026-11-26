@@ -10,7 +10,7 @@ use russh::{
     },
 };
 
-use crate::config::{AUTH_AGENT, AUTH_KEY, AUTH_PASSWORD, Host};
+use crate::config::{AUTH_AGENT, AUTH_KEY, AUTH_KEYBOARD_INTERACTIVE, AUTH_PASSWORD, Host};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostKeyPolicy {
@@ -28,6 +28,20 @@ pub struct HostKeyPrompt {
     pub reply: tokio::sync::oneshot::Sender<bool>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyboardInteractivePrompt {
+    pub prompt: String,
+    pub echo: bool,
+}
+
+#[derive(Debug)]
+pub struct KeyboardInteractiveChallenge {
+    pub name: String,
+    pub instructions: String,
+    pub prompts: Vec<KeyboardInteractivePrompt>,
+    pub reply: tokio::sync::oneshot::Sender<Vec<String>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SshOptions {
     pub known_hosts_path: PathBuf,
@@ -37,6 +51,9 @@ pub struct SshOptions {
     pub keepalive_max: usize,
     pub host_key_prompt: Option<tokio::sync::mpsc::Sender<HostKeyPrompt>>,
     pub host_key_prompt_timeout: Duration,
+    pub keyboard_interactive_prompt:
+        Option<tokio::sync::mpsc::Sender<KeyboardInteractiveChallenge>>,
+    pub keyboard_interactive_timeout: Duration,
 }
 
 impl SshOptions {
@@ -49,6 +66,8 @@ impl SshOptions {
             keepalive_max: 3,
             host_key_prompt: None,
             host_key_prompt_timeout: Duration::from_secs(120),
+            keyboard_interactive_prompt: None,
+            keyboard_interactive_timeout: Duration::from_secs(120),
         }
     }
 }
@@ -60,6 +79,7 @@ pub enum SshCredentials {
         path: PathBuf,
         passphrase: Option<String>,
     },
+    KeyboardInteractive,
 }
 
 #[derive(Debug)]
@@ -71,6 +91,9 @@ pub enum SshError {
     HostKeyConfirmationRejected,
     HostKeyConfirmationUnavailable,
     HostKeyConfirmationTimeout,
+    KeyboardInteractiveUnavailable,
+    KeyboardInteractiveTimeout,
+    KeyboardInteractiveResponseCount { expected: usize, actual: usize },
     MissingCredentials,
     UnsupportedAuthentication(String),
     KeyFile(keys::Error),
@@ -95,6 +118,16 @@ impl std::fmt::Display for SshError {
                 write!(f, "SSH host key confirmation UI is unavailable")
             }
             Self::HostKeyConfirmationTimeout => write!(f, "SSH host key confirmation timed out"),
+            Self::KeyboardInteractiveUnavailable => {
+                write!(f, "SSH keyboard-interactive prompt UI is unavailable")
+            }
+            Self::KeyboardInteractiveTimeout => {
+                write!(f, "SSH keyboard-interactive response timed out")
+            }
+            Self::KeyboardInteractiveResponseCount { expected, actual } => write!(
+                f,
+                "SSH keyboard-interactive expected {expected} responses, received {actual}"
+            ),
             Self::MissingCredentials => write!(f, "SSH credentials are missing"),
             Self::UnsupportedAuthentication(kind) => {
                 write!(f, "unsupported SSH authentication method: {kind}")
@@ -234,12 +267,11 @@ impl SshClient {
             .await
             .map_err(|_| SshError::Timeout)??;
 
-        let auth = match (host.auth.as_str(), credentials) {
-            (AUTH_PASSWORD, SshCredentials::Password(password)) => {
-                handle
-                    .authenticate_password(host.user.clone(), password)
-                    .await?
-            }
+        let authenticated = match (host.auth.as_str(), credentials) {
+            (AUTH_PASSWORD, SshCredentials::Password(password)) => handle
+                .authenticate_password(host.user.clone(), password)
+                .await?
+                .success(),
             (AUTH_KEY, SshCredentials::PrivateKey { path, passphrase }) => {
                 let key = keys::load_secret_key(expand_home(path), passphrase.as_deref())
                     .map_err(SshError::KeyFile)?;
@@ -250,14 +282,26 @@ impl SshClient {
                         PrivateKeyWithHashAlg::new(Arc::new(key), hash),
                     )
                     .await?
+                    .success()
             }
-            (AUTH_AGENT, _) => authenticate_agent(&mut handle, &host.user).await?,
+            (AUTH_AGENT, _) => authenticate_agent(&mut handle, &host.user)
+                .await?
+                .success(),
+            (AUTH_KEYBOARD_INTERACTIVE, SshCredentials::KeyboardInteractive) => {
+                authenticate_keyboard_interactive(
+                    &mut handle,
+                    &host.user,
+                    options.keyboard_interactive_prompt,
+                    options.keyboard_interactive_timeout,
+                )
+                .await?
+            }
             (kind, _) => {
                 return Err(SshError::UnsupportedAuthentication(kind.to_owned()));
             }
         };
 
-        if !auth.success() {
+        if !authenticated {
             return Err(SshError::AuthenticationRejected);
         }
 
@@ -327,6 +371,72 @@ impl SshClient {
             )
             .await?;
         Ok(())
+    }
+}
+
+async fn authenticate_keyboard_interactive(
+    handle: &mut client::Handle<HostKeyVerifier>,
+    user: &str,
+    prompt_sender: Option<tokio::sync::mpsc::Sender<KeyboardInteractiveChallenge>>,
+    timeout: Duration,
+) -> Result<bool, SshError> {
+    use client::KeyboardInteractiveAuthResponse;
+
+    let mut response = tokio::time::timeout(
+        timeout,
+        handle.authenticate_keyboard_interactive_start(user.to_owned(), None),
+    )
+    .await
+    .map_err(|_| SshError::KeyboardInteractiveTimeout)??;
+
+    loop {
+        match response {
+            KeyboardInteractiveAuthResponse::Success => return Ok(true),
+            KeyboardInteractiveAuthResponse::Failure { .. } => return Ok(false),
+            KeyboardInteractiveAuthResponse::InfoRequest {
+                name,
+                instructions,
+                prompts,
+            } => {
+                let Some(sender) = &prompt_sender else {
+                    return Err(SshError::KeyboardInteractiveUnavailable);
+                };
+                let expected = prompts.len();
+                let (reply, answer) = tokio::sync::oneshot::channel();
+                let challenge = KeyboardInteractiveChallenge {
+                    name,
+                    instructions,
+                    prompts: prompts
+                        .into_iter()
+                        .map(|prompt| KeyboardInteractivePrompt {
+                            prompt: prompt.prompt,
+                            echo: prompt.echo,
+                        })
+                        .collect(),
+                    reply,
+                };
+                sender
+                    .send(challenge)
+                    .await
+                    .map_err(|_| SshError::KeyboardInteractiveUnavailable)?;
+                let responses = tokio::time::timeout(timeout, answer)
+                    .await
+                    .map_err(|_| SshError::KeyboardInteractiveTimeout)?
+                    .map_err(|_| SshError::KeyboardInteractiveUnavailable)?;
+                if responses.len() != expected {
+                    return Err(SshError::KeyboardInteractiveResponseCount {
+                        expected,
+                        actual: responses.len(),
+                    });
+                }
+                response = tokio::time::timeout(
+                    timeout,
+                    handle.authenticate_keyboard_interactive_respond(responses),
+                )
+                .await
+                .map_err(|_| SshError::KeyboardInteractiveTimeout)??;
+            }
+        }
     }
 }
 
@@ -450,6 +560,8 @@ mod tests {
         assert_eq!(options.connect_timeout, Duration::from_secs(15));
         assert_eq!(options.host_key_prompt_timeout, Duration::from_secs(120));
         assert!(options.host_key_prompt.is_none());
+        assert!(options.keyboard_interactive_prompt.is_none());
+        assert_eq!(options.keyboard_interactive_timeout, Duration::from_secs(120));
     }
 
     #[test]
