@@ -25,7 +25,10 @@ pub struct TerminalDecoder {
 
 impl TerminalDecoder {
     pub fn new(charset: TerminalCharset) -> Self {
-        Self { charset, decoder: None }
+        Self {
+            charset,
+            decoder: None,
+        }
     }
 
     pub fn set_charset(&mut self, charset: TerminalCharset) {
@@ -36,8 +39,13 @@ impl TerminalDecoder {
     }
 
     pub fn decode(&mut self, input: &[u8]) -> String {
-        let decoder = self.decoder.get_or_insert_with(|| self.charset.encoding().new_decoder());
-        let capacity = self.charset.encoding().max_utf8_buffer_length(input.len())
+        let decoder = self
+            .decoder
+            .get_or_insert_with(|| self.charset.encoding().new_decoder());
+        let capacity = self
+            .charset
+            .encoding()
+            .max_utf8_buffer_length(input.len())
             .unwrap_or(input.len().saturating_mul(4).saturating_add(16));
         let mut output = String::with_capacity(capacity);
         let (_result, _read, _had_errors) = decoder.decode_to_string(input, &mut output, false);

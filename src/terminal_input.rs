@@ -52,7 +52,6 @@ impl TerminalInputEncoder {
         self.mode
     }
 
-    /// Track DEC input modes in server output, including sequences split across packets.
     pub fn observe_output(&mut self, bytes: &[u8]) {
         for &byte in bytes {
             if self.in_csi {
@@ -104,7 +103,10 @@ impl TerminalInputEncoder {
             return;
         };
         let enabled = final_byte == b'h';
-        for value in params.split(';').filter_map(|part| part.parse::<u16>().ok()) {
+        for value in params
+            .split(';')
+            .filter_map(|part| part.parse::<u16>().ok())
+        {
             match value {
                 1 => self.mode.application_cursor = enabled,
                 1000 => {
@@ -146,10 +148,18 @@ impl TerminalInputEncoder {
             TerminalKey::Right => b"\x1b[C",
             TerminalKey::Left => b"\x1b[D",
             TerminalKey::Home => {
-                if self.mode.application_cursor { b"\x1bOH" } else { b"\x1b[H" }
+                if self.mode.application_cursor {
+                    b"\x1bOH"
+                } else {
+                    b"\x1b[H"
+                }
             }
             TerminalKey::End => {
-                if self.mode.application_cursor { b"\x1bOF" } else { b"\x1b[F" }
+                if self.mode.application_cursor {
+                    b"\x1bOF"
+                } else {
+                    b"\x1b[F"
+                }
             }
             TerminalKey::Insert => b"\x1b[2~",
             TerminalKey::Delete => b"\x1b[3~",
@@ -233,14 +243,7 @@ impl TerminalInputEncoder {
             Some(format!("\x1b[<{code};{x};{y}{suffix}").into_bytes())
         } else if x <= 223 && y <= 223 {
             let button = if event.pressed { code as u8 } else { 3 };
-            Some(vec![
-                0x1b,
-                b'[',
-                b'M',
-                32 + button,
-                32 + x as u8,
-                32 + y as u8,
-            ])
+            Some(vec![0x1b, b'[', b'M', 32 + button, 32 + x as u8, 32 + y as u8])
         } else {
             None
         }
