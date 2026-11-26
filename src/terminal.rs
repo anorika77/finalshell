@@ -106,7 +106,7 @@ impl TerminalSession {
                     ..
                 }) => {
                     return Ok(Some(TerminalEvent::ExitSignal {
-                        signal: signal_name.to_string(),
+                        signal: format!("{signal_name:?}"),
                         message: error_message,
                     }));
                 }
