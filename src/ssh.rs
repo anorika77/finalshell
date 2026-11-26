@@ -601,6 +601,17 @@ impl SshClient {
         .await
     }
 
+    /// Opens an independent interactive PTY shell on this SSH connection.
+    pub async fn open_terminal(
+        &self,
+        term: &str,
+        cols: u32,
+        rows: u32,
+    ) -> Result<crate::terminal::TerminalSession, SshError> {
+        let channel = self.handle.channel_open_session().await?;
+        crate::terminal::TerminalSession::open(channel, term, cols, rows).await
+    }
+
     pub async fn open_sftp(&self) -> Result<russh_sftp::client::SftpSession, SshError> {
         let channel = self.handle.channel_open_session().await?;
         channel.request_subsystem(true, "sftp").await?;
