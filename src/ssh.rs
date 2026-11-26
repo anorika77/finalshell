@@ -309,7 +309,8 @@ impl SshClient {
         credentials: SshCredentials,
         options: SshOptions,
     ) -> Result<Self, SshError> {
-        let mut client = Self::connect_inner(host.clone(), credentials, options, Vec::new()).await?;
+        let mut client =
+            Self::connect_inner(host.clone(), credentials, options, Vec::new()).await?;
         client.start_configured_tunnels(&host.tunnels).await;
         Ok(client)
     }
@@ -479,7 +480,6 @@ impl SshClient {
         })
     }
 
-
     async fn start_configured_tunnels(&mut self, specs: &[crate::config::Tunnel]) {
         let mut runs = Vec::with_capacity(specs.len());
         for spec in specs {
@@ -530,15 +530,13 @@ impl SshClient {
         let handle = self.forwarding_handle();
         let routes = self.remote_forward_routes.clone();
         let mut runs = self.tunnels.lock().await;
-        let run = runs.get_mut(index).ok_or_else(|| {
-            SshError::Proxy(format!("tunnel index {index} does not exist"))
-        })?;
+        let run = runs
+            .get_mut(index)
+            .ok_or_else(|| SshError::Proxy(format!("tunnel index {index} does not exist")))?;
         if run.handle.is_some() {
             return Ok(());
         }
-        match crate::forward::start_configured_tunnel(handle, routes, &run.spec)
-        .await
-        {
+        match crate::forward::start_configured_tunnel(handle, routes, &run.spec).await {
             Ok(handle) => {
                 run.handle = Some(handle);
                 run.error = None;
@@ -555,9 +553,9 @@ impl SshClient {
     pub async fn stop_tunnel(&self, index: usize) -> Result<(), SshError> {
         let handle = {
             let mut runs = self.tunnels.lock().await;
-            let run = runs.get_mut(index).ok_or_else(|| {
-                SshError::Proxy(format!("tunnel index {index} does not exist"))
-            })?;
+            let run = runs
+                .get_mut(index)
+                .ok_or_else(|| SshError::Proxy(format!("tunnel index {index} does not exist")))?;
             run.error = None;
             run.handle.take()
         };

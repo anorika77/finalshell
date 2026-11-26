@@ -15,7 +15,10 @@ use tokio::{
     task::{JoinHandle, JoinSet},
 };
 
-use crate::{config::Tunnel, ssh::{HostKeyVerifier, RemoteForwardRoutes, SshError}};
+use crate::{
+    config::Tunnel,
+    ssh::{HostKeyVerifier, RemoteForwardRoutes, SshError},
+};
 
 type SshHandle = Arc<client::Handle<HostKeyVerifier>>;
 
@@ -69,7 +72,6 @@ struct Counters {
     downloaded: AtomicU64,
 }
 
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct TunnelStatus {
     pub spec: Tunnel,
@@ -84,30 +86,31 @@ pub(crate) async fn start_configured_tunnel(
     routes: RemoteForwardRoutes,
     tunnel: &Tunnel,
 ) -> Result<ForwardHandle, SshError> {
-    let listen_host = if tunnel.listen_host.is_empty()
-        || tunnel.listen_host.eq_ignore_ascii_case("localhost")
-    {
-        "127.0.0.1"
-    } else {
-        tunnel.listen_host.as_str()
-    };
+    let listen_host =
+        if tunnel.listen_host.is_empty() || tunnel.listen_host.eq_ignore_ascii_case("localhost") {
+            "127.0.0.1"
+        } else {
+            tunnel.listen_host.as_str()
+        };
 
     match tunnel.kind.as_str() {
         "local" | "dynamic" => {
             let mut addresses = tokio::net::lookup_host((listen_host, tunnel.listen_port))
                 .await
-                .map_err(|error| SshError::Proxy(format!(
-                    "cannot resolve tunnel listen address {listen_host}: {error}"
-                )))?;
+                .map_err(|error| {
+                    SshError::Proxy(format!(
+                        "cannot resolve tunnel listen address {listen_host}: {error}"
+                    ))
+                })?;
             let listen = addresses.next().ok_or_else(|| {
-                SshError::Proxy(format!("no address found for tunnel listen host {listen_host}"))
+                SshError::Proxy(format!(
+                    "no address found for tunnel listen host {listen_host}"
+                ))
             })?;
             let spec = match tunnel.kind.as_str() {
-                "local" => ForwardSpec::local(
-                    listen,
-                    tunnel.target_host.clone(),
-                    tunnel.target_port,
-                ),
+                "local" => {
+                    ForwardSpec::local(listen, tunnel.target_host.clone(), tunnel.target_port)
+                },
                 _ => ForwardSpec::dynamic(listen),
             };
             start(handle, spec).await
