@@ -275,21 +275,25 @@ impl SshClient {
             match host.proxy.as_ref().filter(|proxy| !proxy.kind.is_empty()) {
                 None => {
                     client::connect(Arc::new(config), (host.addr.as_str(), port), verifier).await
-                },
+                }
                 Some(proxy) => {
                     let stream = match proxy.kind.as_str() {
                         "socks5" => {
                             dial_socks5(proxy, options.proxy_password.as_deref(), &host.addr, port)
                                 .await?
-                        },
+                        }
                         "http" => {
                             dial_http_connect(proxy, options.proxy_password.as_deref(), &host.addr, port)
                                 .await?
-                        },
+                            )
+                            .await?
+                        }
                         "jump" => return Err(SshError::Proxy(
                             "Jump Host transport is not implemented yet".into(),
                         )),
-                        kind => return Err(SshError::Proxy(format!("unsupported proxy type: {kind}"))),
+                        kind => {
+                            return Err(SshError::Proxy(format!("unsupported proxy type: {kind}")));
+                        }
                     };
                     client::connect_stream(Arc::new(config), stream, verifier).await
                 }
@@ -426,56 +430,95 @@ async fn dial_socks5(
         .await
         .map_err(|error| SshError::Proxy(error.to_string()))?;
     let mut method = [0u8; 2];
-    stream.read_exact(&mut method).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+    stream
+        .read_exact(&mut method)
+        .await
+        .map_err(|error| SshError::Proxy(error.to_string()))?;
     if method[0] != 5 || method[1] == 0xff || (method[1] == 2 && !authenticated) {
-        return Err(SshError::Proxy("SOCKS5 authentication method rejected".into()));
+        return Err(SshError::Proxy(
+            "SOCKS5 authentication method rejected".into(),
+        ));
     }
     if method[1] == 2 {
         let user = proxy.user.as_bytes();
         let pass = password.unwrap_or_default().as_bytes();
         if user.len() > 255 || pass.len() > 255 {
-            return Err(SshError::Proxy("SOCKS5 credentials exceed 255 bytes".into()));
+            return Err(SshError::Proxy(
+                "SOCKS5 credentials exceed 255 bytes".into(),
+            ));
         }
         let mut auth = Vec::with_capacity(user.len() + pass.len() + 3);
         auth.extend_from_slice(&[1, user.len() as u8]);
         auth.extend_from_slice(user);
         auth.push(pass.len() as u8);
         auth.extend_from_slice(pass);
-        stream.write_all(&auth).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+        stream
+            .write_all(&auth)
+            .await
+            .map_err(|error| SshError::Proxy(error.to_string()))?;
         let mut result = [0u8; 2];
-        stream.read_exact(&mut result).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+        stream
+            .read_exact(&mut result)
+            .await
+            .map_err(|error| SshError::Proxy(error.to_string()))?;
         if result != [1, 0] {
-            return Err(SshError::Proxy("SOCKS5 username/password authentication failed".into()));
+            return Err(SshError::Proxy(
+                "SOCKS5 username/password authentication failed".into(),
+            ));
         }
     } else if method[1] != 0 {
-        return Err(SshError::Proxy(format!("unsupported SOCKS5 auth method {}", method[1])));
+        return Err(SshError::Proxy(format!(
+            "unsupported SOCKS5 auth method {}",
+            method[1]
+        )));
     }
     let host = target_host.as_bytes();
     if host.is_empty() || host.len() > 255 {
-        return Err(SshError::Proxy("SOCKS5 target hostname must be 1..255 bytes".into()));
+        return Err(SshError::Proxy(
+            "SOCKS5 target hostname must be 1..255 bytes".into(),
+        ));
     }
     let mut request = Vec::with_capacity(host.len() + 7);
     request.extend_from_slice(&[5, 1, 0, 3, host.len() as u8]);
     request.extend_from_slice(host);
     request.extend_from_slice(&target_port.to_be_bytes());
-    stream.write_all(&request).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+    stream
+        .write_all(&request)
+        .await
+        .map_err(|error| SshError::Proxy(error.to_string()))?;
     let mut head = [0u8; 4];
-    stream.read_exact(&mut head).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+    stream
+        .read_exact(&mut head)
+        .await
+        .map_err(|error| SshError::Proxy(error.to_string()))?;
     if head[0] != 5 || head[1] != 0 {
-        return Err(SshError::Proxy(format!("SOCKS5 CONNECT failed with reply {}", head[1])));
+        return Err(SshError::Proxy(format!(
+            "SOCKS5 CONNECT failed with reply {}",
+            head[1]
+        )));
     }
     let address_len = match head[3] {
         1 => 4,
         4 => 16,
         3 => {
             let mut len = [0u8; 1];
-            stream.read_exact(&mut len).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+            stream
+                .read_exact(&mut len)
+                .await
+                .map_err(|error| SshError::Proxy(error.to_string()))?;
             len[0] as usize
         }
-        kind => return Err(SshError::Proxy(format!("invalid SOCKS5 address type {kind}"))),
+        kind => {
+            return Err(SshError::Proxy(format!(
+                "invalid SOCKS5 address type {kind}"
+            )));
+        }
     };
     let mut discard = vec![0u8; address_len + 2];
-    stream.read_exact(&mut discard).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+    stream
+        .read_exact(&mut discard)
+        .await
+        .map_err(|error| SshError::Proxy(error.to_string()))?;
     Ok(stream)
 }
 
@@ -498,20 +541,33 @@ async fn dial_http_connect(
         request.push_str(&format!("Proxy-Authorization: Basic {token}\r\n"));
     }
     request.push_str("\r\n");
-    stream.write_all(request.as_bytes()).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|error| SshError::Proxy(error.to_string()))?;
     let mut response = Vec::with_capacity(512);
     let mut byte = [0u8; 1];
     while response.len() < 16 * 1024 {
-        stream.read_exact(&mut byte).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+        stream
+            .read_exact(&mut byte)
+            .await
+            .map_err(|error| SshError::Proxy(error.to_string()))?;
         response.push(byte[0]);
-        if response.ends_with(b"\r\n\r\n") { break; }
+        if response.ends_with(b"\r\n\r\n") {
+            break;
+        }
     }
     if !response.ends_with(b"\r\n\r\n") {
-        return Err(SshError::Proxy("HTTP CONNECT response headers too large".into()));
+        return Err(SshError::Proxy(
+            "HTTP CONNECT response headers too large".into(),
+        ));
     }
     let headers = String::from_utf8_lossy(&response);
     let status = headers.lines().next().unwrap_or_default();
-    let code = status.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok())
+    let code = status
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
         .ok_or_else(|| SshError::Proxy("invalid HTTP CONNECT response".into()))?;
     if !(200..300).contains(&code) {
         return Err(SshError::Proxy(format!("HTTP CONNECT rejected: {status}")));
