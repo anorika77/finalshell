@@ -808,7 +808,10 @@ mod tests {
 
     #[tokio::test]
     async fn socks5_proxy_opens_domain_tunnel() {
-        use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -829,7 +832,10 @@ mod tests {
             stream.read_exact(&mut port).await.unwrap();
             assert_eq!(u16::from_be_bytes(port), 2222);
 
-            stream.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).await.unwrap();
+            stream
+                .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0])
+                .await
+                .unwrap();
             stream.write_all(b"SSH").await.unwrap();
         });
 
@@ -891,5 +897,4 @@ mod tests {
         assert_eq!(base64_encode(b"fo"), "Zm8=");
         assert_eq!(base64_encode(b"foo"), "Zm9v");
     }
-
 }
