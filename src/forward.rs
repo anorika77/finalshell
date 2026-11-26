@@ -110,7 +110,7 @@ pub(crate) async fn start_configured_tunnel(
             let spec = match tunnel.kind.as_str() {
                 "local" => {
                     ForwardSpec::local(listen, tunnel.target_host.clone(), tunnel.target_port)
-                },
+                }
                 _ => ForwardSpec::dynamic(listen),
             };
             start(handle, spec).await
