@@ -3,13 +3,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use russh::{Channel, ChannelMsg, client};
 
 use crate::ssh::SshError;
+use crate::terminal_input::{
+    MouseEvent, TerminalInputEncoder, TerminalInputMode, TerminalKey,
+};
 
 static NEXT_TERMINAL_ID: AtomicU64 = AtomicU64::new(1);
 
-/// A single remote PTY shell. Its identity is independent of UI panes.
 pub struct TerminalSession {
     id: u64,
     channel: Channel<client::Msg>,
+    input: TerminalInputEncoder,
     cols: u32,
     rows: u32,
     closed: bool,
@@ -33,13 +36,12 @@ impl TerminalSession {
     ) -> Result<Self, SshError> {
         let cols = cols.max(1);
         let rows = rows.max(1);
-        channel
-            .request_pty(true, term, cols, rows, 0, 0, &[])
-            .await?;
+        channel.request_pty(true, term, cols, rows, 0, 0, &[]).await?;
         channel.request_shell(true).await?;
         Ok(Self {
             id: NEXT_TERMINAL_ID.fetch_add(1, Ordering::Relaxed),
             channel,
+            input: TerminalInputEncoder::new(),
             cols,
             rows,
             closed: false,
@@ -54,12 +56,32 @@ impl TerminalSession {
         (self.cols, self.rows)
     }
 
+    pub fn input_mode(&self) -> TerminalInputMode {
+        self.input.mode()
+    }
+
     pub async fn send(&self, data: impl Into<Vec<u8>>) -> Result<(), SshError> {
         if self.closed {
             return Err(SshError::TerminalClosed);
         }
         self.channel.data_bytes(data.into()).await?;
         Ok(())
+    }
+
+    pub async fn send_key(&self, key: TerminalKey) -> Result<(), SshError> {
+        self.send(self.input.encode_key(key)).await
+    }
+
+    pub async fn paste(&self, text: &str) -> Result<(), SshError> {
+        self.send(self.input.encode_paste(text)).await
+    }
+
+    pub async fn send_mouse(&self, event: MouseEvent) -> Result<bool, SshError> {
+        let Some(data) = self.input.encode_mouse(event) else {
+            return Ok(false);
+        };
+        self.send(data).await?;
+        Ok(true)
     }
 
     pub async fn resize(&mut self, cols: u32, rows: u32) -> Result<(), SshError> {
@@ -77,8 +99,6 @@ impl TerminalSession {
         Ok(())
     }
 
-    /// Waits for the next PTY event. Output bytes are not decoded here:
-    /// the terminal layer must apply the host's configured character set.
     pub async fn recv(&mut self) -> Result<Option<TerminalEvent>, SshError> {
         if self.closed {
             return Ok(None);
@@ -86,12 +106,14 @@ impl TerminalSession {
         loop {
             match self.channel.wait().await {
                 Some(ChannelMsg::Data { data }) => {
+                    self.input.observe_output(&data);
                     return Ok(Some(TerminalEvent::Output {
                         data: data.to_vec(),
                         extended: false,
                     }));
                 }
                 Some(ChannelMsg::ExtendedData { data, .. }) => {
+                    self.input.observe_output(&data);
                     return Ok(Some(TerminalEvent::Output {
                         data: data.to_vec(),
                         extended: true,

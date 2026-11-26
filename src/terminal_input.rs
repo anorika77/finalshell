@@ -19,27 +19,12 @@ pub struct TerminalInputMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalKey {
-    Up,
-    Down,
-    Right,
-    Left,
-    Home,
-    End,
-    Insert,
-    Delete,
-    PageUp,
-    PageDown,
-    F(u8),
-    Enter,
-    Tab,
-    Backspace,
-    Escape,
-    Ctrl(char),
+    Up, Down, Right, Left, Home, End, Insert, Delete, PageUp, PageDown,
+    F(u8), Enter, Tab, Backspace, Escape, Ctrl(char),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MouseEvent {
-    /// Button number: 0 left, 1 middle, 2 right, 3 release/no button.
     pub button: u8,
     pub x: u16,
     pub y: u16,
@@ -67,7 +52,7 @@ impl TerminalInputEncoder {
         self.mode
     }
 
-    /// Feed server output to track DEC input modes, including sequences split across packets.
+    /// Track DEC input modes in server output, including sequences split across packets.
     pub fn observe_output(&mut self, bytes: &[u8]) {
         for &byte in bytes {
             if self.in_csi {
@@ -87,13 +72,14 @@ impl TerminalInputEncoder {
 
             if self.saw_escape {
                 self.saw_escape = false;
-                if byte == b'[' {
-                    self.in_csi = true;
-                    self.csi.clear();
-                } else if byte == b'=' {
-                    self.mode.application_keypad = true;
-                } else if byte == b'>' {
-                    self.mode.application_keypad = false;
+                match byte {
+                    b'[' => {
+                        self.in_csi = true;
+                        self.csi.clear();
+                    }
+                    b'=' => self.mode.application_keypad = true,
+                    b'>' => self.mode.application_keypad = false,
+                    _ => {}
                 }
                 continue;
             }
@@ -121,9 +107,27 @@ impl TerminalInputEncoder {
         for value in params.split(';').filter_map(|part| part.parse::<u16>().ok()) {
             match value {
                 1 => self.mode.application_cursor = enabled,
-                1000 => self.mode.mouse_tracking = if enabled { MouseTracking::Normal } else { MouseTracking::Off },
-                1002 => self.mode.mouse_tracking = if enabled { MouseTracking::ButtonEvent } else { MouseTracking::Off },
-                1003 => self.mode.mouse_tracking = if enabled { MouseTracking::AnyEvent } else { MouseTracking::Off },
+                1000 => {
+                    self.mode.mouse_tracking = if enabled {
+                        MouseTracking::Normal
+                    } else {
+                        MouseTracking::Off
+                    };
+                }
+                1002 => {
+                    self.mode.mouse_tracking = if enabled {
+                        MouseTracking::ButtonEvent
+                    } else {
+                        MouseTracking::Off
+                    };
+                }
+                1003 => {
+                    self.mode.mouse_tracking = if enabled {
+                        MouseTracking::AnyEvent
+                    } else {
+                        MouseTracking::Off
+                    };
+                }
                 1006 => self.mode.sgr_mouse = enabled,
                 2004 => self.mode.bracketed_paste = enabled,
                 _ => {}
@@ -141,8 +145,12 @@ impl TerminalInputEncoder {
             TerminalKey::Down => b"\x1b[B",
             TerminalKey::Right => b"\x1b[C",
             TerminalKey::Left => b"\x1b[D",
-            TerminalKey::Home => if self.mode.application_cursor { b"\x1bOH" } else { b"\x1b[H" },
-            TerminalKey::End => if self.mode.application_cursor { b"\x1bOF" } else { b"\x1b[F" },
+            TerminalKey::Home => {
+                if self.mode.application_cursor { b"\x1bOH" } else { b"\x1b[H" }
+            }
+            TerminalKey::End => {
+                if self.mode.application_cursor { b"\x1bOF" } else { b"\x1b[F" }
+            }
             TerminalKey::Insert => b"\x1b[2~",
             TerminalKey::Delete => b"\x1b[3~",
             TerminalKey::PageUp => b"\x1b[5~",
@@ -197,15 +205,26 @@ impl TerminalInputEncoder {
         if event.motion && self.mode.mouse_tracking == MouseTracking::Normal {
             return None;
         }
-        if event.motion && self.mode.mouse_tracking == MouseTracking::ButtonEvent && event.button == 3 {
+        if event.motion
+            && self.mode.mouse_tracking == MouseTracking::ButtonEvent
+            && event.button == 3
+        {
             return None;
         }
 
         let mut code = event.button.min(2) as u16;
-        if event.shift { code += 4; }
-        if event.alt { code += 8; }
-        if event.ctrl { code += 16; }
-        if event.motion { code += 32; }
+        if event.shift {
+            code += 4;
+        }
+        if event.alt {
+            code += 8;
+        }
+        if event.ctrl {
+            code += 16;
+        }
+        if event.motion {
+            code += 32;
+        }
 
         let x = event.x.max(1);
         let y = event.y.max(1);
@@ -214,7 +233,14 @@ impl TerminalInputEncoder {
             Some(format!("\x1b[<{code};{x};{y}{suffix}").into_bytes())
         } else if x <= 223 && y <= 223 {
             let button = if event.pressed { code as u8 } else { 3 };
-            Some(vec![0x1b, b'[', b'M', 32 + button, 32 + x as u8, 32 + y as u8])
+            Some(vec![
+                0x1b,
+                b'[',
+                b'M',
+                32 + button,
+                32 + x as u8,
+                32 + y as u8,
+            ])
         } else {
             None
         }
@@ -256,8 +282,14 @@ mod tests {
         let mut encoder = TerminalInputEncoder::new();
         encoder.observe_output(b"\x1b[?1000;1006h");
         let event = MouseEvent {
-            button: 0, x: 12, y: 7, pressed: true,
-            shift: false, alt: false, ctrl: false, motion: false,
+            button: 0,
+            x: 12,
+            y: 7,
+            pressed: true,
+            shift: false,
+            alt: false,
+            ctrl: false,
+            motion: false,
         };
         assert_eq!(encoder.encode_mouse(event).unwrap(), b"\x1b[<0;12;7M");
     }
