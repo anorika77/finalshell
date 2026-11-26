@@ -17,7 +17,8 @@ use russh::{
 
 use crate::config::{AUTH_AGENT, AUTH_KEY, AUTH_KEYBOARD_INTERACTIVE, AUTH_PASSWORD, Host};
 
-pub(crate) type RemoteForwardRoutes = Arc<tokio::sync::Mutex<HashMap<u16, tokio::sync::mpsc::UnboundedSender<Channel<client::Msg>>>>>;
+pub(crate) type RemoteForwardRoutes =
+    Arc<tokio::sync::Mutex<HashMap<u16, tokio::sync::mpsc::UnboundedSender<Channel<client::Msg>>>>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostKeyPolicy {
@@ -282,7 +283,6 @@ impl Handler for HostKeyVerifier {
         }
         Ok(())
     }
-
 }
 
 pub struct SshClient {
