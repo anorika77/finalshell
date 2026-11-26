@@ -4,7 +4,7 @@ use std::{
 };
 
 use russh_sftp::{client::SftpSession, protocol::OpenFlags};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 use crate::{
     config::Host,
