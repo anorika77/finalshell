@@ -856,7 +856,10 @@ mod tests {
 
     #[tokio::test]
     async fn http_connect_proxy_sends_basic_auth_and_preserves_tunnel() {
-        use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -871,7 +874,10 @@ mod tests {
             let request = String::from_utf8(request).unwrap();
             assert!(request.contains("CONNECT ssh.example:22 HTTP/1.1"));
             assert!(request.contains("Proxy-Authorization: Basic dXNlcjpwYXNz"));
-            stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\nSSH").await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\nSSH")
+                .await
+                .unwrap();
         });
 
         let proxy = crate::config::ProxyConfig {
