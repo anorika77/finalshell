@@ -124,26 +124,51 @@ fn remove_leaf(node: PaneNode, id: u64) -> (Option<PaneNode>, bool) {
     match node {
         PaneNode::Terminal(current) if current == id => (None, true),
         PaneNode::Terminal(_) => (Some(node), false),
-        PaneNode::Split { axis, ratio, first, second } => {
+        PaneNode::Split {
+            axis,
+            ratio,
+            first,
+            second,
+        } => {
             let (new_first, removed_first) = remove_leaf(*first, id);
             if removed_first {
-                return (Some(match new_first {
-                    Some(first) => PaneNode::Split {
-                        axis, ratio, first: Box::new(first), second,
-                    },
-                    None => *second,
-                }), true);
+                return (
+                    Some(match new_first {
+                        Some(first) => PaneNode::Split {
+                            axis,
+                            ratio,
+                            first: Box::new(first),
+                            second,
+                        },
+                        None => *second,
+                    }),
+                    true,
+                );
             }
             let (new_second, removed_second) = remove_leaf(*second, id);
             if removed_second {
-                return (Some(match new_second {
-                    Some(second) => PaneNode::Split {
-                        axis, ratio, first, second: Box::new(second),
-                    },
-                    None => *first,
-                }), true);
+                return (
+                    Some(match new_second {
+                        Some(second) => PaneNode::Split {
+                            axis,
+                            ratio,
+                            first: Box::new(new_first.expect("first pane remains")),
+                            second: Box::new(second),
+                        },
+                        None => *new_first.expect("first pane remains"),
+                    }),
+                    true,
+                );
             }
-            (Some(PaneNode::Split { axis, ratio, first, second }), false)
+            (
+                Some(PaneNode::Split {
+                    axis,
+                    ratio,
+                    first: Box::new(new_first.expect("first pane remains")),
+                    second: Box::new(new_second.expect("second pane remains")),
+                }),
+                false,
+            )
         }
     }
 }
