@@ -495,7 +495,7 @@ impl SshClient {
             .await
             .map_err(SshError::from);
         for jump in self.jump_chain.drain(..).rev() {
-            if let Err(error) = jump.disconnect().await {
+            if let Err(error) = Box::pin(jump.disconnect()).await {
                 if result.is_ok() {
                     result = Err(error);
                 }
