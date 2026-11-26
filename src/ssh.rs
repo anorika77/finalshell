@@ -291,9 +291,11 @@ impl SshClient {
                             )
                             .await?
                         }
-                        "jump" => return Err(SshError::Proxy(
-                            "Jump Host transport is not implemented yet".into(),
-                        )),
+                        "jump" => {
+                            return Err(SshError::Proxy(
+                                "Jump Host transport is not implemented yet".into(),
+                            ));
+                        }
                         kind => {
                             return Err(SshError::Proxy(format!("unsupported proxy type: {kind}")));
                         }
