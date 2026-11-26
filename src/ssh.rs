@@ -1,6 +1,9 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 
 use russh::{
     Channel, Disconnect,
@@ -270,23 +273,19 @@ impl SshClient {
         };
         let connect = async {
             match host.proxy.as_ref().filter(|proxy| !proxy.kind.is_empty()) {
-                None => client::connect(Arc::new(config), (host.addr.as_str(), port), verifier).await,
+                None => {
+                    client::connect(Arc::new(config), (host.addr.as_str(), port), verifier).await
+                },
                 Some(proxy) => {
                     let stream = match proxy.kind.as_str() {
-                        "socks5" => dial_socks5(
-                            proxy,
-                            options.proxy_password.as_deref(),
-                            &host.addr,
-                            port,
-                            options.connect_timeout,
-                        ).await?,
-                        "http" => dial_http_connect(
-                            proxy,
-                            options.proxy_password.as_deref(),
-                            &host.addr,
-                            port,
-                            options.connect_timeout,
-                        ).await?,
+                        "socks5" => {
+                            dial_socks5(proxy, options.proxy_password.as_deref(), &host.addr, port)
+                                .await?
+                        },
+                        "http" => {
+                            dial_http_connect(proxy, options.proxy_password.as_deref(), &host.addr, port)
+                                .await?
+                        },
                         "jump" => return Err(SshError::Proxy(
                             "Jump Host transport is not implemented yet".into(),
                         )),
@@ -411,14 +410,20 @@ async fn dial_socks5(
     password: Option<&str>,
     target_host: &str,
     target_port: u16,
-    timeout: Duration,
 ) -> Result<TcpStream, SshError> {
     let port = if proxy.port == 0 { 1080 } else { proxy.port };
     let addr = format!("{}:{port}", proxy.addr);
-    let mut stream = TcpStream::connect(&addr).await
+    let mut stream = TcpStream::connect(&addr)
+        .await
         .map_err(|error| SshError::Proxy(format!("cannot connect to {addr}: {error}")))?;
     let authenticated = !proxy.user.is_empty();
-    stream.write_all(if authenticated { &[5, 2, 0, 2] } else { &[5, 1, 0] }).await
+    stream
+        .write_all(if authenticated {
+            &[5, 2, 0, 2]
+        } else {
+            &[5, 1, 0]
+        })
+        .await
         .map_err(|error| SshError::Proxy(error.to_string()))?;
     let mut method = [0u8; 2];
     stream.read_exact(&mut method).await.map_err(|error| SshError::Proxy(error.to_string()))?;
@@ -471,7 +476,6 @@ async fn dial_socks5(
     };
     let mut discard = vec![0u8; address_len + 2];
     stream.read_exact(&mut discard).await.map_err(|error| SshError::Proxy(error.to_string()))?;
-    let _ = timeout;
     Ok(stream)
 }
 
@@ -480,16 +484,17 @@ async fn dial_http_connect(
     password: Option<&str>,
     target_host: &str,
     target_port: u16,
-    _timeout: Duration,
 ) -> Result<TcpStream, SshError> {
     let port = if proxy.port == 0 { 8080 } else { proxy.port };
     let addr = format!("{}:{port}", proxy.addr);
-    let mut stream = TcpStream::connect(&addr).await
+    let mut stream = TcpStream::connect(&addr)
+        .await
         .map_err(|error| SshError::Proxy(format!("cannot connect to {addr}: {error}")))?;
     let target = format!("{target_host}:{target_port}");
     let mut request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
     if !proxy.user.is_empty() {
-        let token = base64_encode(format!("{}:{}", proxy.user, password.unwrap_or_default()).as_bytes());
+        let token =
+            base64_encode(format!("{}:{}", proxy.user, password.unwrap_or_default()).as_bytes());
         request.push_str(&format!("Proxy-Authorization: Basic {token}\r\n"));
     }
     request.push_str("\r\n");
@@ -523,8 +528,16 @@ fn base64_encode(input: &[u8]) -> String {
         let c = *chunk.get(2).unwrap_or(&0);
         output.push(TABLE[(a >> 2) as usize] as char);
         output.push(TABLE[(((a & 3) << 4) | (b >> 4)) as usize] as char);
-        output.push(if chunk.len() > 1 { TABLE[(((b & 15) << 2) | (c >> 6)) as usize] as char } else { '=' });
-        output.push(if chunk.len() > 2 { TABLE[(c & 63) as usize] as char } else { '=' });
+        output.push(if chunk.len() > 1 {
+            TABLE[(((b & 15) << 2) | (c >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        output.push(if chunk.len() > 2 {
+            TABLE[(c & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     output
 }
