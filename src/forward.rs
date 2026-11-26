@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use russh::{Channel, client};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional},
     net::{TcpListener, TcpStream},
@@ -16,7 +17,7 @@ use tokio::{
 
 use crate::ssh::{HostKeyVerifier, SshError};
 
-type SshHandle = russh::client::Handle<HostKeyVerifier>;
+type SshHandle = Arc<client::Handle<HostKeyVerifier>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForwardKind {
@@ -97,7 +98,7 @@ impl ForwardHandle {
     }
 }
 
-pub async fn start(handle: SshHandle, spec: ForwardSpec) -> Result<ForwardHandle, SshError> {
+pub(crate) async fn start(handle: SshHandle, spec: ForwardSpec) -> Result<ForwardHandle, SshError> {
     if spec.kind == ForwardKind::Local
         && (spec.target_host.as_deref().unwrap_or("").is_empty()
             || spec.target_port.unwrap_or(0) == 0)
@@ -148,18 +149,17 @@ async fn accept_loop(
                     let c = counters.clone();
                     let target = spec.target_host.clone();
                     let port = spec.target_port;
+                    let kind = spec.kind;
                     tokio::spawn(async move {
                         let _active = ActiveGuard(c.clone());
-                        let _ = tokio::time::timeout(Duration::from_secs(30), async {
-                            match spec.kind {
-                                ForwardKind::Local => {
-                                    let Some(host) = target else { return; };
-                                    let Some(port) = port else { return; };
-                                    bridge(h, stream, host, port, peer).await;
+                        match kind {
+                            ForwardKind::Local => {
+                                if let (Some(host), Some(port)) = (target, port) {
+                                    bridge(h, stream, host, port, peer, c).await;
                                 }
-                                ForwardKind::Dynamic => dynamic_bridge(h, stream, peer).await,
                             }
-                        }).await;
+                            ForwardKind::Dynamic => dynamic_bridge(h, stream, peer, c).await,
+                        }
                     });
                 }
                 Err(_) => break,
@@ -182,8 +182,9 @@ async fn bridge(
     host: String,
     port: u16,
     peer: SocketAddr,
+    counters: Arc<Counters>,
 ) {
-    let Ok(channel) = tokio::time::timeout(
+    let Ok(Ok(channel)) = tokio::time::timeout(
         Duration::from_secs(15),
         handle.channel_open_direct_tcpip(
             host,
@@ -196,100 +197,117 @@ async fn bridge(
     else {
         return;
     };
-    let Ok(channel) = channel else {
+    let mut remote = channel.into_stream();
+    if let Ok((up, down)) = copy_bidirectional(&mut local, &mut remote).await {
+        counters.uploaded.fetch_add(up, Ordering::Relaxed);
+        counters.downloaded.fetch_add(down, Ordering::Relaxed);
+    }
+}
+
+async fn dynamic_bridge(
+    handle: SshHandle,
+    mut local: TcpStream,
+    peer: SocketAddr,
+    counters: Arc<Counters>,
+) {
+    let Ok(Ok(channel)) = tokio::time::timeout(
+        Duration::from_secs(30),
+        socks_open(&handle, &mut local, peer),
+    )
+    .await
+    else {
         return;
     };
     let mut remote = channel.into_stream();
-    let _ = copy_bidirectional(&mut local, &mut remote).await;
+    if let Ok((up, down)) = copy_bidirectional(&mut local, &mut remote).await {
+        counters.uploaded.fetch_add(up, Ordering::Relaxed);
+        counters.downloaded.fetch_add(down, Ordering::Relaxed);
+    }
 }
 
-async fn dynamic_bridge(handle: SshHandle, mut local: TcpStream, peer: SocketAddr) {
-    let result = async {
-        let mut greeting = [0u8; 2];
-        local.read_exact(&mut greeting).await?;
-        if greeting[0] != 5 {
+async fn socks_open(
+    handle: &SshHandle,
+    local: &mut TcpStream,
+    peer: SocketAddr,
+) -> std::io::Result<Channel<client::Msg>> {
+    let mut greeting = [0u8; 2];
+    local.read_exact(&mut greeting).await?;
+    if greeting[0] != 5 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "SOCKS version",
+        ));
+    }
+    let mut methods = vec![0; greeting[1] as usize];
+    local.read_exact(&mut methods).await?;
+    if !methods.contains(&0) {
+        local.write_all(&[5, 0xff]).await?;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "SOCKS authentication required",
+        ));
+    }
+    local.write_all(&[5, 0]).await?;
+    let mut request = [0u8; 4];
+    local.read_exact(&mut request).await?;
+    if request[0] != 5 || request[1] != 1 {
+        local.write_all(&[5, 7, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "SOCKS command",
+        ));
+    }
+    let host = match request[3] {
+        1 => {
+            let mut ip = [0u8; 4];
+            local.read_exact(&mut ip).await?;
+            std::net::Ipv4Addr::from(ip).to_string()
+        }
+        4 => {
+            let mut ip = [0u8; 16];
+            local.read_exact(&mut ip).await?;
+            std::net::Ipv6Addr::from(ip).to_string()
+        }
+        3 => {
+            let mut len = [0u8; 1];
+            local.read_exact(&mut len).await?;
+            let mut name = vec![0; len[0] as usize];
+            local.read_exact(&mut name).await?;
+            String::from_utf8(name).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "SOCKS hostname")
+            })?
+        }
+        _ => {
+            local.write_all(&[5, 8, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "SOCKS version",
+                "SOCKS address type",
             ));
         }
-        let mut methods = vec![0; greeting[1] as usize];
-        local.read_exact(&mut methods).await?;
-        if !methods.contains(&0) {
-            local.write_all(&[5, 0xff]).await?;
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "SOCKS authentication required",
-            ));
-        }
-        local.write_all(&[5, 0]).await?;
-        let mut request = [0u8; 4];
-        local.read_exact(&mut request).await?;
-        if request[0] != 5 || request[1] != 1 {
-            local.write_all(&[5, 7, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "SOCKS command",
-            ));
-        }
-        let host = match request[3] {
-            1 => {
-                let mut ip = [0u8; 4];
-                local.read_exact(&mut ip).await?;
-                std::net::Ipv4Addr::from(ip).to_string()
-            }
-            4 => {
-                let mut ip = [0u8; 16];
-                local.read_exact(&mut ip).await?;
-                std::net::Ipv6Addr::from(ip).to_string()
-            }
-            3 => {
-                let mut len = [0u8; 1];
-                local.read_exact(&mut len).await?;
-                let mut name = vec![0; len[0] as usize];
-                local.read_exact(&mut name).await?;
-                String::from_utf8(name).map_err(|_| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, "SOCKS hostname")
-                })?
-            }
-            _ => {
-                local.write_all(&[5, 8, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "SOCKS address type",
-                ));
-            }
-        };
-        let mut port = [0u8; 2];
-        local.read_exact(&mut port).await?;
-        let port = u16::from_be_bytes(port);
-        let opened = tokio::time::timeout(
-            Duration::from_secs(15),
-            handle.channel_open_direct_tcpip(
-                host,
-                port as u32,
-                peer.ip().to_string(),
-                peer.port() as u32,
-            ),
+    };
+    let mut port = [0u8; 2];
+    local.read_exact(&mut port).await?;
+    let port = u16::from_be_bytes(port);
+    let channel = match handle
+        .channel_open_direct_tcpip(
+            host,
+            port as u32,
+            peer.ip().to_string(),
+            peer.port() as u32,
         )
-        .await;
-        let channel = match opened {
-            Ok(Ok(channel)) => channel,
-            _ => {
-                local.write_all(&[5, 5, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::ConnectionRefused,
-                    "SSH destination refused",
-                ));
-            }
-        };
-        local.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
-        let mut remote = channel.into_stream();
-        let _ = copy_bidirectional(&mut local, &mut remote).await?;
-        Ok::<(), std::io::Error>(())
-    }
-    .await;
-    let _ = result;
+        .await
+    {
+        Ok(channel) => channel,
+        Err(_) => {
+            local.write_all(&[5, 5, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                "SSH destination refused",
+            ));
+        }
+    };
+    local.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
+    Ok(channel)
 }
 
 #[cfg(test)]

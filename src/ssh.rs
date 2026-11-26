@@ -257,7 +257,7 @@ impl Handler for HostKeyVerifier {
 }
 
 pub struct SshClient {
-    handle: client::Handle<HostKeyVerifier>,
+    handle: Arc<client::Handle<HostKeyVerifier>>,
     host: String,
     port: u16,
     jump_chain: Vec<SshClient>,
@@ -428,7 +428,7 @@ impl SshClient {
             }
 
             Ok(Self {
-                handle,
+                handle: Arc::new(handle),
                 host: host.addr.clone(),
                 port,
                 jump_chain,
@@ -436,8 +436,15 @@ impl SshClient {
         })
     }
 
-    pub(crate) fn forwarding_handle(&self) -> client::Handle<HostKeyVerifier> {
+    pub(crate) fn forwarding_handle(&self) -> Arc<client::Handle<HostKeyVerifier>> {
         self.handle.clone()
+    }
+
+    pub async fn start_forward(
+        &self,
+        spec: crate::forward::ForwardSpec,
+    ) -> Result<crate::forward::ForwardHandle, SshError> {
+        crate::forward::start(self.forwarding_handle(), spec).await
     }
 
     pub async fn open_sftp(&self) -> Result<russh_sftp::client::SftpSession, SshError> {
