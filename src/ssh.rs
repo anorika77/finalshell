@@ -60,6 +60,15 @@ pub struct SshOptions {
         Option<tokio::sync::mpsc::Sender<KeyboardInteractiveChallenge>>,
     pub keyboard_interactive_timeout: Duration,
     pub proxy_password: Option<String>,
+    pub jump_host: Option<Box<JumpHostConfig>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JumpHostConfig {
+    pub host: Host,
+    pub credentials: SshCredentials,
+    pub proxy_password: Option<String>,
+    pub jump: Option<Box<JumpHostConfig>>,
 }
 
 impl SshOptions {
@@ -75,11 +84,12 @@ impl SshOptions {
             keyboard_interactive_prompt: None,
             keyboard_interactive_timeout: Duration::from_secs(120),
             proxy_password: None,
+            jump_host: None,
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SshCredentials {
     Password(String),
     PrivateKey {
@@ -248,7 +258,13 @@ pub struct SshClient {
     handle: client::Handle<HostKeyVerifier>,
     host: String,
     port: u16,
+    jump_chain: Vec<SshClient>,
 }
+
+trait SshTransport: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T> SshTransport for T where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
+{}
 
 impl SshClient {
     pub async fn connect(
@@ -256,98 +272,175 @@ impl SshClient {
         credentials: SshCredentials,
         options: SshOptions,
     ) -> Result<Self, SshError> {
-        let port = host.port_or_22();
-        let verifier = HostKeyVerifier {
-            host: host.addr.clone(),
-            port,
-            path: options.known_hosts_path,
-            policy: options.host_key_policy,
-            prompt: options.host_key_prompt,
-            prompt_timeout: options.host_key_prompt_timeout,
-        };
-        let config = client::Config {
-            keepalive_interval: options.keepalive_interval,
-            keepalive_max: options.keepalive_max,
-            nodelay: true,
-            ..Default::default()
-        };
-        let connect = async {
-            match host.proxy.as_ref().filter(|proxy| !proxy.kind.is_empty()) {
-                None => {
-                    client::connect(Arc::new(config), (host.addr.as_str(), port), verifier).await
-                }
-                Some(proxy) => {
-                    let stream = match proxy.kind.as_str() {
-                        "socks5" => {
-                            dial_socks5(proxy, options.proxy_password.as_deref(), &host.addr, port)
-                                .await?
-                        }
-                        "http" => {
-                            dial_http_connect(
-                                proxy,
-                                options.proxy_password.as_deref(),
-                                &host.addr,
-                                port,
-                            )
-                            .await?
-                        }
-                        "jump" => {
-                            return Err(SshError::Proxy(
-                                "Jump Host transport is not implemented yet".into(),
-                            ));
-                        }
-                        kind => {
-                            return Err(SshError::Proxy(format!("unsupported proxy type: {kind}")));
-                        }
-                    };
-                    client::connect_stream(Arc::new(config), stream, verifier).await
-                }
-            }
-        };
-        let mut handle = tokio::time::timeout(options.connect_timeout, connect)
-            .await
-            .map_err(|_| SshError::Timeout)??;
+        Self::connect_inner(host, credentials, options, Vec::new()).await
+    }
 
-        let authenticated = match (host.auth.as_str(), credentials) {
-            (AUTH_PASSWORD, SshCredentials::Password(password)) => handle
-                .authenticate_password(host.user.clone(), password)
-                .await?
-                .success(),
-            (AUTH_KEY, SshCredentials::PrivateKey { path, passphrase }) => {
-                let key = keys::load_secret_key(expand_home(path), passphrase.as_deref())
-                    .map_err(SshError::KeyFile)?;
-                let hash = handle.best_supported_rsa_hash().await?.flatten();
-                handle
-                    .authenticate_publickey(
-                        host.user.clone(),
-                        PrivateKeyWithHashAlg::new(Arc::new(key), hash),
+    fn connect_inner<'a>(
+        host: &'a Host,
+        credentials: SshCredentials,
+        options: SshOptions,
+        mut visited: Vec<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, SshError>> + Send + 'a>> {
+        Box::pin(async move {
+            if visited.len() >= 8 {
+                return Err(SshError::Proxy(
+                    "Jump Host chain exceeds the maximum depth of 8".into(),
+                ));
+            }
+            if !host.id.is_empty() {
+                if visited.iter().any(|id| id == &host.id) {
+                    return Err(SshError::Proxy(format!(
+                        "Jump Host cycle detected at host {}",
+                        host.id
+                    )));
+                }
+                visited.push(host.id.clone());
+            }
+
+            let port = host.port_or_22();
+            let verifier = HostKeyVerifier {
+                host: host.addr.clone(),
+                port,
+                path: options.known_hosts_path.clone(),
+                policy: options.host_key_policy,
+                prompt: options.host_key_prompt.clone(),
+                prompt_timeout: options.host_key_prompt_timeout,
+            };
+            let config = client::Config {
+                keepalive_interval: options.keepalive_interval,
+                keepalive_max: options.keepalive_max,
+                nodelay: true,
+                ..Default::default()
+            };
+            let mut jump_chain = Vec::new();
+            let connect = async {
+                match host.proxy.as_ref().filter(|proxy| !proxy.kind.is_empty()) {
+                    None => {
+                        client::connect(
+                            Arc::new(config),
+                            (host.addr.as_str(), port),
+                            verifier,
+                        )
+                        .await
+                    }
+                    Some(proxy) => {
+                        let stream: Box<dyn SshTransport> = match proxy.kind.as_str() {
+                            "socks5" => Box::new(
+                                dial_socks5(
+                                    proxy,
+                                    options.proxy_password.as_deref(),
+                                    &host.addr,
+                                    port,
+                                )
+                                .await?,
+                            ),
+                            "http" => Box::new(
+                                dial_http_connect(
+                                    proxy,
+                                    options.proxy_password.as_deref(),
+                                    &host.addr,
+                                    port,
+                                )
+                                .await?,
+                            ),
+                            "jump" => {
+                                let jump = options.jump_host.as_ref().ok_or_else(|| {
+                                    SshError::Proxy(format!(
+                                        "host {} requires Jump Host {}, but no jump credentials were supplied",
+                                        host.name,
+                                        proxy.jump_host
+                                    ))
+                                })?;
+                                if !proxy.jump_host.is_empty()
+                                    && jump.host.id != proxy.jump_host
+                                {
+                                    return Err(SshError::Proxy(format!(
+                                        "configured Jump Host ID {} does not match required ID {}",
+                                        jump.host.id, proxy.jump_host
+                                    )));
+                                }
+                                let mut jump_options = options.clone();
+                                jump_options.proxy_password = jump.proxy_password.clone();
+                                jump_options.jump_host = jump.jump.clone();
+                                let jump_client = Self::connect_inner(
+                                    &jump.host,
+                                    jump.credentials.clone(),
+                                    jump_options,
+                                    visited.clone(),
+                                )
+                                .await?;
+                                let jump_channel = tokio::time::timeout(
+                                    options.connect_timeout,
+                                    jump_client.handle.channel_open_direct_tcpip(
+                                        host.addr.clone(),
+                                        port as u32,
+                                        "127.0.0.1",
+                                        0,
+                                    ),
+                                )
+                                .await
+                                .map_err(|_| SshError::Timeout)??;
+                                jump_chain.push(jump_client);
+                                Box::new(jump_channel.into_stream())
+                            }
+                            kind => {
+                                return Err(SshError::Proxy(format!(
+                                    "unsupported proxy type: {kind}"
+                                )));
+                            }
+                        };
+                        client::connect_stream(Arc::new(config), stream, verifier).await
+                    }
+                }
+            };
+            let mut handle = tokio::time::timeout(options.connect_timeout, connect)
+                .await
+                .map_err(|_| SshError::Timeout)??;
+
+            let authenticated = match (host.auth.as_str(), credentials) {
+                (AUTH_PASSWORD, SshCredentials::Password(password)) => handle
+                    .authenticate_password(host.user.clone(), password)
+                    .await?
+                    .success(),
+                (AUTH_KEY, SshCredentials::PrivateKey { path, passphrase }) => {
+                    let key = keys::load_secret_key(expand_home(path), passphrase.as_deref())
+                        .map_err(SshError::KeyFile)?;
+                    let hash = handle.best_supported_rsa_hash().await?.flatten();
+                    handle
+                        .authenticate_publickey(
+                            host.user.clone(),
+                            PrivateKeyWithHashAlg::new(Arc::new(key), hash),
+                        )
+                        .await?
+                        .success()
+                }
+                (AUTH_AGENT, _) => {
+                    authenticate_agent(&mut handle, &host.user).await?.success()
+                }
+                (AUTH_KEYBOARD_INTERACTIVE, SshCredentials::KeyboardInteractive) => {
+                    authenticate_keyboard_interactive(
+                        &mut handle,
+                        &host.user,
+                        options.keyboard_interactive_prompt,
+                        options.keyboard_interactive_timeout,
                     )
                     .await?
-                    .success()
-            }
-            (AUTH_AGENT, _) => authenticate_agent(&mut handle, &host.user).await?.success(),
-            (AUTH_KEYBOARD_INTERACTIVE, SshCredentials::KeyboardInteractive) => {
-                authenticate_keyboard_interactive(
-                    &mut handle,
-                    &host.user,
-                    options.keyboard_interactive_prompt,
-                    options.keyboard_interactive_timeout,
-                )
-                .await?
-            }
-            (kind, _) => {
-                return Err(SshError::UnsupportedAuthentication(kind.to_owned()));
-            }
-        };
+                }
+                (kind, _) => {
+                    return Err(SshError::UnsupportedAuthentication(kind.to_owned()));
+                }
+            };
 
-        if !authenticated {
-            return Err(SshError::AuthenticationRejected);
-        }
+            if !authenticated {
+                return Err(SshError::AuthenticationRejected);
+            }
 
-        Ok(Self {
-            handle,
-            host: host.addr.clone(),
-            port,
+            Ok(Self {
+                handle,
+                host: host.addr.clone(),
+                port,
+                jump_chain,
+            })
         })
     }
 
@@ -401,15 +494,24 @@ impl SshClient {
         Ok(())
     }
 
-    pub async fn disconnect(self) -> Result<(), SshError> {
-        self.handle
+    pub async fn disconnect(mut self) -> Result<(), SshError> {
+        let mut result = self
+            .handle
             .disconnect(
                 Disconnect::ByApplication,
                 "FinalShell closed the session",
                 "en",
             )
-            .await?;
-        Ok(())
+            .await
+            .map_err(SshError::from);
+        for jump in self.jump_chain.drain(..).rev() {
+            if let Err(error) = jump.disconnect().await {
+                if result.is_ok() {
+                    result = Err(error);
+                }
+            }
+        }
+        result
     }
 }
 
