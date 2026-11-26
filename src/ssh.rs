@@ -272,15 +272,15 @@ impl SshClient {
         credentials: SshCredentials,
         options: SshOptions,
     ) -> Result<Self, SshError> {
-        Self::connect_inner(host, credentials, options, Vec::new()).await
+        Self::connect_inner(host.clone(), credentials, options, Vec::new()).await
     }
 
-    fn connect_inner<'a>(
-        host: &'a Host,
+    fn connect_inner(
+        host: Host,
         credentials: SshCredentials,
         options: SshOptions,
         mut visited: Vec<String>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, SshError>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, SshError>> + Send>> {
         Box::pin(async move {
             if visited.len() >= 8 {
                 return Err(SshError::Proxy(
@@ -363,7 +363,7 @@ impl SshClient {
                                 jump_options.proxy_password = jump.proxy_password.clone();
                                 jump_options.jump_host = jump.jump.clone();
                                 let jump_client = Self::connect_inner(
-                                    &jump.host,
+                                    jump.host.clone(),
                                     jump.credentials.clone(),
                                     jump_options,
                                     visited.clone(),
