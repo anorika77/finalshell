@@ -134,19 +134,6 @@ impl TerminalSession {
     }
 }
 
-impl Drop for TerminalSession {
-    fn drop(&mut self) {
-        if !self.closed {
-            self.closed = true;
-            let channel = self.channel.clone();
-            tokio::spawn(async move {
-                let _ = channel.eof().await;
-                let _ = channel.close().await;
-            });
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
