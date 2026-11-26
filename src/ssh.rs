@@ -105,6 +105,7 @@ pub enum SshCredentials {
 #[derive(Debug)]
 pub enum SshError {
     Timeout,
+    TerminalClosed,
     Proxy(String),
     Sftp(String),
     UnknownHostKey { host: String, port: u16 },
@@ -128,6 +129,7 @@ impl std::fmt::Display for SshError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Timeout => write!(f, "SSH connection timed out"),
+            Self::TerminalClosed => write!(f, "SSH terminal session is closed"),
             Self::Proxy(message) => write!(f, "SSH proxy: {message}"),
             Self::Sftp(message) => write!(f, "SSH SFTP: {message}"),
             Self::UnknownHostKey { host, port } => {
