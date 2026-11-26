@@ -805,4 +805,91 @@ mod tests {
         host.port = 2222;
         assert_eq!(host.port_or_22(), 2222);
     }
+
+    #[tokio::test]
+    async fn socks5_proxy_opens_domain_tunnel() {
+        use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut greeting = [0u8; 3];
+            stream.read_exact(&mut greeting).await.unwrap();
+            assert_eq!(greeting, [5, 1, 0]);
+            stream.write_all(&[5, 0]).await.unwrap();
+
+            let mut request = [0u8; 5];
+            stream.read_exact(&mut request).await.unwrap();
+            assert_eq!(&request[..4], &[5, 1, 0, 3]);
+            let mut host = vec![0u8; request[4] as usize];
+            stream.read_exact(&mut host).await.unwrap();
+            assert_eq!(host, b"ssh.example");
+            let mut port = [0u8; 2];
+            stream.read_exact(&mut port).await.unwrap();
+            assert_eq!(u16::from_be_bytes(port), 2222);
+
+            stream.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).await.unwrap();
+            stream.write_all(b"SSH").await.unwrap();
+        });
+
+        let proxy = crate::config::ProxyConfig {
+            kind: "socks5".into(),
+            addr: "127.0.0.1".into(),
+            port: address.port(),
+            ..Default::default()
+        };
+        let mut stream = dial_socks5(&proxy, None, "ssh.example", 2222)
+            .await
+            .unwrap();
+        let mut banner = [0u8; 3];
+        stream.read_exact(&mut banner).await.unwrap();
+        assert_eq!(&banner, b"SSH");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn http_connect_proxy_sends_basic_auth_and_preserves_tunnel() {
+        use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0u8; 1];
+            while !request.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).await.unwrap();
+                request.push(byte[0]);
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(request.contains("CONNECT ssh.example:22 HTTP/1.1"));
+            assert!(request.contains("Proxy-Authorization: Basic dXNlcjpwYXNz"));
+            stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\nSSH").await.unwrap();
+        });
+
+        let proxy = crate::config::ProxyConfig {
+            kind: "http".into(),
+            addr: "127.0.0.1".into(),
+            port: address.port(),
+            user: "user".into(),
+            ..Default::default()
+        };
+        let mut stream = dial_http_connect(&proxy, Some("pass"), "ssh.example", 22)
+            .await
+            .unwrap();
+        let mut banner = [0u8; 3];
+        stream.read_exact(&mut banner).await.unwrap();
+        assert_eq!(&banner, b"SSH");
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn base64_encoder_handles_padding() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+    }
+
 }
