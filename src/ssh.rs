@@ -103,6 +103,7 @@ pub enum SshCredentials {
 pub enum SshError {
     Timeout,
     Proxy(String),
+    Sftp(String),
     UnknownHostKey { host: String, port: u16 },
     ChangedHostKey { host: String, port: u16 },
     AuthenticationRejected,
@@ -125,6 +126,7 @@ impl std::fmt::Display for SshError {
         match self {
             Self::Timeout => write!(f, "SSH connection timed out"),
             Self::Proxy(message) => write!(f, "SSH proxy: {message}"),
+            Self::Sftp(message) => write!(f, "SSH SFTP: {message}"),
             Self::UnknownHostKey { host, port } => {
                 write!(f, "unknown SSH host key for {host}:{port}")
             }
@@ -432,6 +434,14 @@ impl SshClient {
                 jump_chain,
             })
         })
+    }
+
+    pub async fn open_sftp(&self) -> Result<russh_sftp::client::SftpSession, SshError> {
+        let channel = self.handle.channel_open_session().await?;
+        channel.request_subsystem(true, "sftp").await?;
+        russh_sftp::client::SftpSession::new(channel.into_stream())
+            .await
+            .map_err(|error| SshError::Sftp(error.to_string()))
     }
 
     pub fn is_closed(&self) -> bool {

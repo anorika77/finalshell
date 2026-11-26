@@ -1,5 +1,6 @@
 pub mod config;
 pub mod ssh;
+pub mod sftp;
 
 fn main() {
     println!("FinalShell Rust rewrite");
