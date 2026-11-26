@@ -289,12 +289,7 @@ async fn socks_open(
     local.read_exact(&mut port).await?;
     let port = u16::from_be_bytes(port);
     let channel = match handle
-        .channel_open_direct_tcpip(
-            host,
-            port as u32,
-            peer.ip().to_string(),
-            peer.port() as u32,
-        )
+        .channel_open_direct_tcpip(host, port as u32, peer.ip().to_string(), peer.port() as u32)
         .await
     {
         Ok(channel) => channel,
