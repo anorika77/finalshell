@@ -245,11 +245,16 @@ impl TerminalManager {
         rows: u32,
     ) -> Result<u64, SshError> {
         let new_id = self.open(ssh, term, cols, rows).await?;
-        let layout = self.layout.as_mut().expect("opening a terminal creates a layout");
+        let layout = self
+            .layout
+            .as_mut()
+            .expect("opening a terminal creates a layout");
         if !layout.split_focused(new_id, axis, ratio) {
             self.sessions.remove(&new_id);
             self.active = layout.focused().into();
-            return Err(SshError::Proxy("cannot split the active terminal pane".into()));
+            return Err(SshError::Proxy(
+                "cannot split the active terminal pane".into(),
+            ));
         }
         Ok(new_id)
     }
