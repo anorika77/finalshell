@@ -1,0 +1,12 @@
+[package]
+name = "ui-iced-smoke"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[dependencies]
+iced = { version = "=0.14.0" }
+
+[dev-dependencies]
+iced_test = { version = "=0.14.0" }
