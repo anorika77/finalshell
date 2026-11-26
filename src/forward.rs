@@ -330,9 +330,9 @@ mod tests {
 
     #[test]
     fn remote_forward_listen_host_must_be_an_ip_or_localhost() {
-        assert_eq!(remote_listen_ip(\"localhost\").unwrap(), \"127.0.0.1\".parse().unwrap());
-        assert_eq!(remote_listen_ip(\"::1\").unwrap(), \"::1\".parse().unwrap());
-        assert!(remote_listen_ip(\"remote.example\").is_err());
+        assert_eq!(remote_listen_ip("localhost").unwrap(), "127.0.0.1".parse().unwrap());
+        assert_eq!(remote_listen_ip("::1").unwrap(), "::1".parse().unwrap());
+        assert!(remote_listen_ip("remote.example").is_err());
     }
 }
 
@@ -390,7 +390,7 @@ pub(crate) async fn start_remote(
 
     let requested_port = spec.listen_port;
     let actual_port = match handle.tcpip_forward(address.clone(), requested_port as u32).await {
-        Ok(port) if requested_port > 0 => requested_port,
+        Ok(_) if requested_port > 0 => requested_port,
         Ok(port) if port > 0 && port <= u16::MAX as u32 => port as u16,
         Ok(_) => {
             routes.lock().await.remove(&route_key);
