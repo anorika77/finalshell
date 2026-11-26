@@ -1,38 +1,107 @@
+use encoding_rs::{Encoding, BIG5, GBK, UTF_8};
 use vt100::Parser;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalCharset {
+    Utf8,
+    Gbk,
+    Big5,
+}
+
+impl TerminalCharset {
+    fn encoding(self) -> &'static Encoding {
+        match self {
+            Self::Utf8 => UTF_8,
+            Self::Gbk => GBK,
+            Self::Big5 => BIG5,
+        }
+    }
+}
+
+/// Incremental decoder preserves incomplete multibyte sequences across SSH packets.
+pub struct TerminalDecoder {
+    charset: TerminalCharset,
+    decoder: Option<encoding_rs::Decoder>,
+}
+
+impl TerminalDecoder {
+    pub fn new(charset: TerminalCharset) -> Self {
+        Self { charset, decoder: None }
+    }
+
+    pub fn set_charset(&mut self, charset: TerminalCharset) {
+        if self.charset != charset {
+            self.charset = charset;
+            self.decoder = None;
+        }
+    }
+
+    pub fn decode(&mut self, input: &[u8]) -> String {
+        let decoder = self.decoder.get_or_insert_with(|| self.charset.encoding().new_decoder());
+        let capacity = self.charset.encoding().max_utf8_buffer_length(input.len()).unwrap_or(input.len().saturating_mul(4).saturating_add(16));
+        let mut output = String::with_capacity(capacity);
+        let (_result, _read, _had_errors) = decoder.decode_to_string(input, &mut output, false);
+        output
+    }
+
+    pub fn finish(&mut self) -> String {
+        let Some(decoder) = self.decoder.as_mut() else { return String::new(); };
+        let mut output = String::with_capacity(16);
+        let _ = decoder.decode_to_string(&[], &mut output, true);
+        self.decoder = None;
+        output
+    }
+
+    pub fn charset(&self) -> TerminalCharset {
+        self.charset
+    }
+}
 
 /// Stateful VT terminal model, separate from the SSH transport and UI pane.
 pub struct TerminalScreen {
     parser: Parser,
+    decoder: TerminalDecoder,
     rows: u16,
     cols: u16,
 }
 
 impl TerminalScreen {
     pub fn new(rows: u16, cols: u16, scrollback_capacity: usize) -> Self {
-        let rows = rows.max(1);
-        let cols = cols.max(1);
-        Self {
-            parser: Parser::new(rows, cols, scrollback_capacity),
-            rows,
-            cols,
-        }
+        Self::with_charset(rows, cols, scrollback_capacity, TerminalCharset::Utf8)
     }
 
-    /// Feed raw terminal bytes. Keep decoding out of this layer so the
-    /// transport and parser never corrupt split multibyte sequences.
+    pub fn with_charset(rows: u16, cols: u16, scrollback_capacity: usize, charset: TerminalCharset) -> Self {
+        let rows = rows.max(1);
+        let cols = cols.max(1);
+        Self { parser: Parser::new(rows, cols, scrollback_capacity), decoder: TerminalDecoder::new(charset), rows, cols }
+    }
+
+    pub fn set_charset(&mut self, charset: TerminalCharset) {
+        self.decoder.set_charset(charset);
+    }
+
+    pub fn charset(&self) -> TerminalCharset {
+        self.decoder.charset()
+    }
+
     pub fn process(&mut self, bytes: &[u8]) {
-        self.parser.process(bytes);
+        let decoded = self.decoder.decode(bytes);
+        self.parser.process(decoded.as_bytes());
+    }
+
+    pub fn finish_input(&mut self) {
+        let decoded = self.decoder.finish();
+        self.parser.process(decoded.as_bytes());
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.rows = rows.max(1);
         self.cols = cols.max(1);
-        self.parser.set_size(self.rows, self.cols);
+        self.parser.screen_mut().set_size(self.rows, self.cols);
     }
 
-    /// Scrollback offset: zero is the live viewport.
     pub fn set_scrollback(&mut self, offset: usize) {
-        self.parser.set_scrollback(offset);
+        self.parser.screen_mut().set_scrollback(offset);
     }
 
     pub fn scrollback_offset(&self) -> usize {
@@ -51,8 +120,6 @@ impl TerminalScreen {
         self.parser.screen().contents()
     }
 
-    /// ANSI-formatted visible screen, suitable for a renderer that supports
-    /// the terminal's SGR attributes.
     pub fn contents_formatted(&self) -> Vec<u8> {
         self.parser.screen().contents_formatted()
     }
@@ -78,7 +145,7 @@ mod tests {
     #[test]
     fn parses_ansi_colors_and_formatted_output() {
         let mut screen = TerminalScreen::new(2, 20, 0);
-        screen.process(b"\\x1b[31mred\\x1b[0m");
+        screen.process(b"\x1b[31mred\x1b[0m");
         let cell = screen.parser.screen().cell(0, 0).unwrap();
         assert_eq!(cell.fgcolor(), vt100::Color::Idx(1));
         assert!(!screen.contents_formatted().is_empty());
@@ -95,9 +162,36 @@ mod tests {
     #[test]
     fn alternate_screen_mode_is_tracked() {
         let mut screen = TerminalScreen::new(2, 10, 10);
-        screen.process(b"\\x1b[?1049h");
+        screen.process(b"\x1b[?1049h");
         assert!(screen.alternate_screen());
-        screen.process(b"\\x1b[?1049l");
+        screen.process(b"\x1b[?1049l");
         assert!(!screen.alternate_screen());
+    }
+
+    #[test]
+    fn gbk_multibyte_sequence_survives_packet_boundary() {
+        let encoded = "中文".as_bytes();
+        let (bytes, _, _) = GBK.encode("中文");
+        let bytes = bytes.into_owned();
+        let mut decoder = TerminalDecoder::new(TerminalCharset::Gbk);
+        let first = decoder.decode(&bytes[..1]);
+        let second = decoder.decode(&bytes[1..]);
+        assert_eq!(format!("{first}{second}"), "中文");
+        assert_eq!(encoded, "中文".as_bytes());
+    }
+
+    #[test]
+    fn big5_decodes_traditional_chinese() {
+        let (bytes, _, _) = BIG5.encode("繁體中文");
+        let mut decoder = TerminalDecoder::new(TerminalCharset::Big5);
+        assert_eq!(decoder.decode(bytes.as_ref()), "繁體中文");
+    }
+
+    #[test]
+    fn changing_charset_resets_incomplete_sequence() {
+        let mut decoder = TerminalDecoder::new(TerminalCharset::Gbk);
+        let _ = decoder.decode(&[0xD6]);
+        decoder.set_charset(TerminalCharset::Utf8);
+        assert_eq!(decoder.decode("OK".as_bytes()), "OK");
     }
 }
