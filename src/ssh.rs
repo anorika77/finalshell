@@ -169,7 +169,7 @@ impl From<russh::Error> for SshError {
     }
 }
 
-struct HostKeyVerifier {
+pub(crate) struct HostKeyVerifier {
     host: String,
     port: u16,
     path: PathBuf,
@@ -434,6 +434,10 @@ impl SshClient {
                 jump_chain,
             })
         })
+    }
+
+    pub(crate) fn forwarding_handle(&self) -> client::Handle<HostKeyVerifier> {
+        self.handle.clone()
     }
 
     pub async fn open_sftp(&self) -> Result<russh_sftp::client::SftpSession, SshError> {
