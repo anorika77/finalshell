@@ -335,9 +335,9 @@ mod tests {
     fn remote_forward_listen_host_must_be_an_ip_or_localhost() {
         assert_eq!(
             remote_listen_ip("localhost").unwrap(),
-            "127.0.0.1".parse().unwrap()
+            "127.0.0.1".parse::<std::net::IpAddr>().unwrap()
         );
-        assert_eq!(remote_listen_ip("::1").unwrap(), "::1".parse().unwrap());
+        assert_eq!(remote_listen_ip("::1").unwrap(), "::1".parse::<std::net::IpAddr>().unwrap());
         assert!(remote_listen_ip("remote.example").is_err());
     }
 }
