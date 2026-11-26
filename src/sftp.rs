@@ -3,10 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use russh_sftp::{
-    client::SftpSession,
-    protocol::OpenFlags,
-};
+use russh_sftp::{client::SftpSession, protocol::OpenFlags};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
