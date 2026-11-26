@@ -258,6 +258,7 @@ impl TerminalManager {
             .expect("opening a terminal creates a layout");
         if !layout.split_focused(new_id, axis, ratio) {
             self.sessions.remove(&new_id);
+            self.screens.remove(&new_id);
             self.active = layout.focused().into();
             return Err(SshError::Proxy(
                 "cannot split the active terminal pane".into(),
@@ -307,6 +308,31 @@ impl TerminalManager {
         self.screens.get_mut(&terminal_id)
     }
 
+    pub fn process_output(&mut self, terminal_id: u64, bytes: &[u8]) -> bool {
+        if let Some(screen) = self.screens.get_mut(&terminal_id) {
+            screen.process(bytes);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn resize(
+        &mut self,
+        terminal_id: u64,
+        cols: u32,
+        rows: u32,
+    ) -> Result<bool, SshError> {
+        let Some(session) = self.sessions.get_mut(&terminal_id) else {
+            return Ok(false);
+        };
+        session.resize(cols, rows).await?;
+        if let Some(screen) = self.screens.get_mut(&terminal_id) {
+            screen.resize(rows.min(u16::MAX as u32) as u16, cols.min(u16::MAX as u32) as u16);
+        }
+        Ok(true)
+    }
+
     pub fn set_charset(&mut self, terminal_id: u64, charset: TerminalCharset) -> bool {
         if let Some(screen) = self.screens.get_mut(&terminal_id) {
             screen.set_charset(charset);
@@ -333,6 +359,7 @@ impl TerminalManager {
             return Ok(false);
         };
         session.close().await?;
+        self.screens.remove(&terminal_id);
         if let Some(layout) = &mut self.layout {
             if layout.focused() == terminal_id {
                 let _ = layout.close_focused();
