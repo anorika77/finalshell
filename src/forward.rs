@@ -15,7 +15,7 @@ use tokio::{
     task::{JoinHandle, JoinSet},
 };
 
-use crate::ssh::{HostKeyVerifier, SshError};
+use crate::{config::Tunnel, ssh::{HostKeyVerifier, RemoteForwardRoutes, SshError}};
 
 type SshHandle = Arc<client::Handle<HostKeyVerifier>>;
 
@@ -67,6 +67,66 @@ struct Counters {
     total: AtomicU64,
     uploaded: AtomicU64,
     downloaded: AtomicU64,
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunnelStatus {
+    pub spec: Tunnel,
+    pub listening: bool,
+    pub address: Option<SocketAddr>,
+    pub error: Option<String>,
+    pub stats: ForwardStats,
+}
+
+pub(crate) async fn start_configured_tunnel(
+    handle: SshHandle,
+    routes: RemoteForwardRoutes,
+    tunnel: &Tunnel,
+) -> Result<ForwardHandle, SshError> {
+    let listen_host = if tunnel.listen_host.is_empty()
+        || tunnel.listen_host.eq_ignore_ascii_case("localhost")
+    {
+        "127.0.0.1"
+    } else {
+        tunnel.listen_host.as_str()
+    };
+
+    match tunnel.kind.as_str() {
+        "local" | "dynamic" => {
+            let mut addresses = tokio::net::lookup_host((listen_host, tunnel.listen_port))
+                .await
+                .map_err(|error| SshError::Proxy(format!(
+                    "cannot resolve tunnel listen address {listen_host}: {error}"
+                )))?;
+            let listen = addresses.next().ok_or_else(|| {
+                SshError::Proxy(format!("no address found for tunnel listen host {listen_host}"))
+            })?;
+            let spec = match tunnel.kind.as_str() {
+                "local" => ForwardSpec::local(
+                    listen,
+                    tunnel.target_host.clone(),
+                    tunnel.target_port,
+                ),
+                _ => ForwardSpec::dynamic(listen),
+            };
+            start(handle, spec).await
+        }
+        "remote" => {
+            start_remote(
+                handle,
+                routes,
+                RemoteForwardSpec {
+                    listen_host: listen_host.to_owned(),
+                    listen_port: tunnel.listen_port,
+                    target_host: tunnel.target_host.clone(),
+                    target_port: tunnel.target_port,
+                },
+            )
+            .await
+        }
+        kind => Err(SshError::Proxy(format!("unsupported tunnel kind: {kind}"))),
+    }
 }
 
 pub struct ForwardHandle {

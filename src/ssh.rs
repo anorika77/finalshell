@@ -180,6 +180,7 @@ pub(crate) struct HostKeyVerifier {
     prompt: Option<tokio::sync::mpsc::Sender<HostKeyPrompt>>,
     prompt_timeout: Duration,
     remote_forward_routes: RemoteForwardRoutes,
+    tunnels: tokio::sync::Mutex<Vec<ManagedTunnel>>,
 }
 
 impl Handler for HostKeyVerifier {
@@ -285,6 +286,12 @@ impl Handler for HostKeyVerifier {
     }
 }
 
+struct ManagedTunnel {
+    spec: crate::config::Tunnel,
+    handle: Option<crate::forward::ForwardHandle>,
+    error: Option<String>,
+}
+
 pub struct SshClient {
     handle: Arc<client::Handle<HostKeyVerifier>>,
     host: String,
@@ -302,7 +309,9 @@ impl SshClient {
         credentials: SshCredentials,
         options: SshOptions,
     ) -> Result<Self, SshError> {
-        Self::connect_inner(host.clone(), credentials, options, Vec::new()).await
+        let mut client = Self::connect_inner(host.clone(), credentials, options, Vec::new()).await?;
+        client.start_configured_tunnels(&host.tunnels).await;
+        Ok(client)
     }
 
     fn connect_inner(
@@ -465,8 +474,112 @@ impl SshClient {
                 port,
                 jump_chain,
                 remote_forward_routes,
+                tunnels: tokio::sync::Mutex::new(Vec::new()),
             })
         })
+    }
+
+
+    async fn start_configured_tunnels(&mut self, specs: &[crate::config::Tunnel]) {
+        let mut runs = Vec::with_capacity(specs.len());
+        for spec in specs {
+            let mut run = ManagedTunnel {
+                spec: spec.clone(),
+                handle: None,
+                error: None,
+            };
+            if !spec.disabled {
+                match crate::forward::start_configured_tunnel(
+                    self.forwarding_handle(),
+                    self.remote_forward_routes.clone(),
+                    spec,
+                )
+                .await
+                {
+                    Ok(handle) => run.handle = Some(handle),
+                    Err(error) => run.error = Some(error.to_string()),
+                }
+            }
+            runs.push(run);
+        }
+        *self.tunnels.get_mut() = runs;
+    }
+
+    /// Returns the configured tunnel states in their original host-config order.
+    pub async fn tunnel_statuses(&self) -> Vec<crate::forward::TunnelStatus> {
+        self.tunnels
+            .lock()
+            .await
+            .iter()
+            .map(|run| crate::forward::TunnelStatus {
+                spec: run.spec.clone(),
+                listening: run.handle.is_some(),
+                address: run.handle.as_ref().map(|handle| handle.local_addr()),
+                error: run.error.clone(),
+                stats: run
+                    .handle
+                    .as_ref()
+                    .map(crate::forward::ForwardHandle::stats)
+                    .unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    /// Starts one configured tunnel by its zero-based position in Host.tunnels.
+    pub async fn start_tunnel(&self, index: usize) -> Result<(), SshError> {
+        let mut runs = self.tunnels.lock().await;
+        let run = runs.get_mut(index).ok_or_else(|| {
+            SshError::Proxy(format!("tunnel index {index} does not exist"))
+        })?;
+        if run.handle.is_some() {
+            return Ok(());
+        }
+        match crate::forward::start_configured_tunnel(
+            self.forwarding_handle(),
+            self.remote_forward_routes.clone(),
+            &run.spec,
+        )
+        .await
+        {
+            Ok(handle) => {
+                run.handle = Some(handle);
+                run.error = None;
+                Ok(())
+            }
+            Err(error) => {
+                run.error = Some(error.to_string());
+                Err(error)
+            }
+        }
+    }
+
+    /// Stops one tunnel but keeps its configuration and status row.
+    pub async fn stop_tunnel(&self, index: usize) -> Result<(), SshError> {
+        let handle = {
+            let mut runs = self.tunnels.lock().await;
+            let run = runs.get_mut(index).ok_or_else(|| {
+                SshError::Proxy(format!("tunnel index {index} does not exist"))
+            })?;
+            run.error = None;
+            run.handle.take()
+        };
+        if let Some(handle) = handle {
+            handle.close().await;
+        }
+        Ok(())
+    }
+
+    /// Stops all tunnels before the SSH transport is disconnected.
+    pub async fn stop_tunnels(&self) {
+        let handles = {
+            let mut runs = self.tunnels.lock().await;
+            runs.iter_mut()
+                .filter_map(|run| run.handle.take())
+                .collect::<Vec<_>>()
+        };
+        for handle in handles {
+            handle.close().await;
+        }
     }
 
     pub(crate) fn forwarding_handle(&self) -> Arc<client::Handle<HostKeyVerifier>> {
@@ -551,6 +664,7 @@ impl SshClient {
     }
 
     pub async fn disconnect(mut self) -> Result<(), SshError> {
+        self.stop_tunnels().await;
         let mut result = self
             .handle
             .disconnect(
