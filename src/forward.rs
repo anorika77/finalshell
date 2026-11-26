@@ -388,7 +388,9 @@ pub(crate) async fn start_remote(
         registered.insert(route_key, sender.clone());
     }
 
-    let actual_port = match handle.tcpip_forward(address.clone(), spec.listen_port as u32).await {
+    let requested_port = spec.listen_port;
+    let actual_port = match handle.tcpip_forward(address.clone(), requested_port as u32).await {
+        Ok(port) if requested_port > 0 => requested_port,
         Ok(port) if port > 0 && port <= u16::MAX as u32 => port as u16,
         Ok(_) => {
             routes.lock().await.remove(&route_key);
