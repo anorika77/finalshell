@@ -42,11 +42,7 @@ impl TerminalDecoder {
         let decoder = self
             .decoder
             .get_or_insert_with(|| self.charset.encoding().new_decoder());
-        let capacity = self
-            .charset
-            .encoding()
-            .max_utf8_buffer_length(input.len())
-            .unwrap_or(input.len().saturating_mul(4).saturating_add(16));
+        let capacity = input.len().saturating_mul(4).saturating_add(16);
         let mut output = String::with_capacity(capacity);
         let (_result, _read, _had_errors) = decoder.decode_to_string(input, &mut output, false);
         output

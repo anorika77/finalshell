@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use crate::{
     ssh::{SshClient, SshError},
-    terminal::TerminalSession,
+    terminal::{TerminalSession},
+    terminal_screen::{TerminalCharset, TerminalScreen},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,7 +156,7 @@ fn remove_leaf(node: PaneNode, id: u64) -> (Option<PaneNode>, bool) {
                             first: Box::new(new_first.expect("first pane remains")),
                             second: Box::new(second),
                         },
-                        None => *new_first.expect("first pane remains"),
+                        None => new_first.expect("first pane remains"),
                     }),
                     true,
                 );
@@ -205,6 +206,7 @@ fn swap_leaves(node: &mut PaneNode, first_id: u64, second_id: u64) {
 /// Owns multiple independent PTY channels over one authenticated SSH connection.
 pub struct TerminalManager {
     sessions: BTreeMap<u64, TerminalSession>,
+    screens: BTreeMap<u64, TerminalScreen>,
     active: Option<u64>,
     layout: Option<PaneLayout>,
 }
@@ -213,6 +215,7 @@ impl TerminalManager {
     pub fn new() -> Self {
         Self {
             sessions: BTreeMap::new(),
+            screens: BTreeMap::new(),
             active: None,
             layout: None,
         }
@@ -228,6 +231,10 @@ impl TerminalManager {
         let session = ssh.open_terminal(term, cols, rows).await?;
         let id = session.id();
         self.sessions.insert(id, session);
+        self.screens.insert(
+            id,
+            TerminalScreen::new(rows.min(u16::MAX as u32) as u16, cols.min(u16::MAX as u32) as u16, 10_000),
+        );
         self.active = Some(id);
         if self.layout.is_none() {
             self.layout = Some(PaneLayout::new(id));
@@ -292,6 +299,23 @@ impl TerminalManager {
         self.layout.as_ref()
     }
 
+    pub fn screen(&self, terminal_id: u64) -> Option<&TerminalScreen> {
+        self.screens.get(&terminal_id)
+    }
+
+    pub fn screen_mut(&mut self, terminal_id: u64) -> Option<&mut TerminalScreen> {
+        self.screens.get_mut(&terminal_id)
+    }
+
+    pub fn set_charset(&mut self, terminal_id: u64, charset: TerminalCharset) -> bool {
+        if let Some(screen) = self.screens.get_mut(&terminal_id) {
+            screen.set_charset(charset);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn get(&self, terminal_id: u64) -> Option<&TerminalSession> {
         self.sessions.get(&terminal_id)
     }
@@ -334,6 +358,7 @@ impl TerminalManager {
         for (_, mut session) in std::mem::take(&mut self.sessions) {
             let _ = session.close().await;
         }
+        self.screens.clear();
         self.active = None;
         self.layout = None;
     }

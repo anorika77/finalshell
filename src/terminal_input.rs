@@ -205,7 +205,10 @@ impl TerminalInputEncoder {
             TerminalKey::Ctrl('^') => b"\x1e",
             TerminalKey::Ctrl('_') => b"\x1f",
             TerminalKey::Ctrl('?') => b"\x7f",
-            TerminalKey::F(_) => return Vec::new(),
+            TerminalKey::Ctrl(ch) if ch.is_ascii() => {
+                return vec![ch.to_ascii_uppercase() as u8 & 0x1f];
+            }
+            TerminalKey::F(_) | TerminalKey::Ctrl(_) => return Vec::new(),
         };
         bytes.to_vec()
     }
