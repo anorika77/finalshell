@@ -1,0 +1,1306 @@
+use std::collections::BTreeSet;
+
+use gpui::{
+    AnyElement, App, Context, ListAlignment, ListState, QuitMode, Window, WindowOptions, div, list,
+    prelude::*, px,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConnectionHost {
+    id: u64,
+    name: String,
+    group: &'static str,
+}
+
+impl ConnectionHost {
+    fn fixture() -> Vec<Self> {
+        (0..1_000_u64)
+            .map(|id| {
+                let group = match id % 3 {
+                    0 => "production",
+                    1 => "database",
+                    _ => "web",
+                };
+                Self {
+                    id: id + 1,
+                    name: format!("{group}-host-{:04}", id + 1),
+                    group,
+                }
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileEntry {
+    id: u64,
+    name: String,
+    kind: &'static str,
+}
+
+impl FileEntry {
+    fn fixture() -> Vec<Self> {
+        (0..10_000_u64)
+            .map(|index| {
+                let id = index + 1;
+                let kind = match index % 3 {
+                    0 => "config",
+                    1 => "log",
+                    _ => "source",
+                };
+                let extension = match kind {
+                    "config" => "toml",
+                    "log" => "log",
+                    _ => "rs",
+                };
+                Self {
+                    id,
+                    name: format!("{}-file-{id:05}.{extension}", kind),
+                    kind,
+                }
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MonitorTab {
+    Overview,
+    Network,
+    Processes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SplitAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PaneIdentity {
+    pane_id: u64,
+    session_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PaneNode {
+    Leaf(PaneIdentity),
+    Split {
+        axis: SplitAxis,
+        first: Box<PaneNode>,
+        second: Box<PaneNode>,
+    },
+}
+
+impl PaneNode {
+    fn leaf_count(&self) -> usize {
+        match self {
+            Self::Leaf(_) => 1,
+            Self::Split { first, second, .. } => first.leaf_count() + second.leaf_count(),
+        }
+    }
+
+    fn first_leaf(&self) -> PaneIdentity {
+        match self {
+            Self::Leaf(pane) => *pane,
+            Self::Split { first, .. } => first.first_leaf(),
+        }
+    }
+
+    fn contains_session(&self, session_id: u64) -> bool {
+        match self {
+            Self::Leaf(pane) => pane.session_id == session_id,
+            Self::Split { first, second, .. } => {
+                first.contains_session(session_id) || second.contains_session(session_id)
+            }
+        }
+    }
+
+    fn split_leaf(&mut self, pane_id: u64, new_pane: PaneIdentity, axis: SplitAxis) -> bool {
+        match self {
+            Self::Leaf(pane) if pane.pane_id == pane_id => {
+                let existing = *pane;
+                *self = Self::Split {
+                    axis,
+                    first: Box::new(Self::Leaf(existing)),
+                    second: Box::new(Self::Leaf(new_pane)),
+                };
+                true
+            }
+            Self::Leaf(_) => false,
+            Self::Split { first, second, .. } => {
+                first.split_leaf(pane_id, new_pane, axis)
+                    || second.split_leaf(pane_id, new_pane, axis)
+            }
+        }
+    }
+
+    fn remove_leaf(&mut self, pane_id: u64) -> bool {
+        let Self::Split { first, second, .. } = self else {
+            return false;
+        };
+
+        if matches!(first.as_ref(), Self::Leaf(pane) if pane.pane_id == pane_id) {
+            *self = (**second).clone();
+            return true;
+        }
+        if matches!(second.as_ref(), Self::Leaf(pane) if pane.pane_id == pane_id) {
+            *self = (**first).clone();
+            return true;
+        }
+
+        first.remove_leaf(pane_id) || second.remove_leaf(pane_id)
+    }
+
+    fn collect_panes(&self, panes: &mut Vec<PaneIdentity>) {
+        match self {
+            Self::Leaf(pane) => panes.push(*pane),
+            Self::Split { first, second, .. } => {
+                first.collect_panes(panes);
+                second.collect_panes(panes);
+            }
+        }
+    }
+}
+
+struct WorkspacePrototype {
+    root: PaneNode,
+    monitor_tab: MonitorTab,
+    focused_pane_id: u64,
+    next_pane_id: u64,
+    sessions: BTreeSet<u64>,
+    connection_hosts: Vec<ConnectionHost>,
+    connection_filter: String,
+    connection_list_state: ListState,
+    selected_host_id: Option<u64>,
+    files: Vec<FileEntry>,
+    file_filter: String,
+    file_list_state: ListState,
+    selected_file_id: Option<u64>,
+}
+
+impl Default for WorkspacePrototype {
+    fn default() -> Self {
+        Self {
+            root: PaneNode::Leaf(PaneIdentity {
+                pane_id: 1,
+                session_id: 101,
+            }),
+            focused_pane_id: 1,
+            next_pane_id: 2,
+            monitor_tab: MonitorTab::Overview,
+            sessions: BTreeSet::from([101]),
+            connection_hosts: ConnectionHost::fixture(),
+            connection_filter: String::new(),
+            connection_list_state: ListState::new(1_000, ListAlignment::Top, px(52.0))
+                .with_uniform_item_height(px(26.0)),
+            selected_host_id: None,
+            files: FileEntry::fixture(),
+            file_filter: String::new(),
+            file_list_state: ListState::new(10_000, ListAlignment::Top, px(48.0))
+                .with_uniform_item_height(px(24.0)),
+            selected_file_id: None,
+        }
+    }
+}
+
+impl WorkspacePrototype {
+    fn set_connection_filter(&mut self, filter: &str) {
+        self.connection_filter = filter.to_ascii_lowercase();
+        let count = self.filtered_connection_hosts().len();
+        self.connection_list_state
+            .reset_with_uniform_height(count, px(26.0));
+        if self.selected_host_id.is_some_and(|selected| {
+            !self
+                .connection_hosts
+                .iter()
+                .any(|host| host.id == selected && self.host_matches_filter(host))
+        }) {
+            self.selected_host_id = None;
+        }
+    }
+
+    fn host_matches_filter(&self, host: &ConnectionHost) -> bool {
+        self.connection_filter.is_empty()
+            || host
+                .name
+                .to_ascii_lowercase()
+                .contains(&self.connection_filter)
+            || host.group.contains(&self.connection_filter)
+    }
+
+    fn filtered_connection_hosts(&self) -> Vec<ConnectionHost> {
+        self.connection_hosts
+            .iter()
+            .filter(|host| self.host_matches_filter(host))
+            .cloned()
+            .collect()
+    }
+
+    fn set_file_filter(&mut self, filter: &str) {
+        self.file_filter = filter.to_ascii_lowercase();
+        let count = self.filtered_files().len();
+        self.file_list_state
+            .reset_with_uniform_height(count, px(24.0));
+        if self.selected_file_id.is_some_and(|selected| {
+            !self
+                .files
+                .iter()
+                .any(|file| file.id == selected && self.file_matches_filter(file))
+        }) {
+            self.selected_file_id = None;
+        }
+    }
+
+    fn file_matches_filter(&self, file: &FileEntry) -> bool {
+        self.file_filter.is_empty() || file.kind == self.file_filter
+    }
+
+    fn filtered_files(&self) -> Vec<FileEntry> {
+        self.files
+            .iter()
+            .filter(|file| self.file_matches_filter(file))
+            .cloned()
+            .collect()
+    }
+
+    fn select_monitor(&mut self, tab: MonitorTab) {
+        self.monitor_tab = tab;
+    }
+
+    fn panes(&self) -> Vec<PaneIdentity> {
+        let mut panes = Vec::with_capacity(self.root.leaf_count());
+        self.root.collect_panes(&mut panes);
+        panes
+    }
+
+    fn split_focused(&mut self, axis: SplitAxis) {
+        let Some(focused) = self
+            .panes()
+            .into_iter()
+            .find(|pane| pane.pane_id == self.focused_pane_id)
+        else {
+            return;
+        };
+
+        let new_pane = PaneIdentity {
+            pane_id: self.next_pane_id,
+            session_id: focused.session_id,
+        };
+        if self.root.split_leaf(self.focused_pane_id, new_pane, axis) {
+            self.next_pane_id += 1;
+            self.focused_pane_id = new_pane.pane_id;
+        }
+    }
+
+    fn close_focused(&mut self) -> bool {
+        if self.root.leaf_count() <= 1 {
+            return false;
+        }
+
+        let closing_pane_id = self.focused_pane_id;
+        if !self.root.remove_leaf(closing_pane_id) {
+            return false;
+        }
+
+        self.focused_pane_id = self.root.first_leaf().pane_id;
+        // A pane is only a view onto a session. Closing it never disconnects that session.
+        true
+    }
+
+    fn session_is_active(&self, session_id: u64) -> bool {
+        self.sessions.contains(&session_id)
+    }
+
+    fn session_has_panes(&self, session_id: u64) -> bool {
+        self.root.contains_session(session_id)
+    }
+}
+
+fn render_pane_node(
+    node: &PaneNode,
+    focused_pane_id: u64,
+    cx: &Context<WorkspacePrototype>,
+) -> AnyElement {
+    match node {
+        PaneNode::Leaf(pane) => {
+            let pane_id = pane.pane_id;
+            let label = format!("Pane {} / Session {}", pane.pane_id, pane.session_id);
+            let focused = pane_id == focused_pane_id;
+            div()
+                .id(format!("pane-{pane_id}"))
+                .debug_selector(move || format!("pane-{pane_id}"))
+                .flex()
+                .flex_1()
+                .p_2()
+                .child(if focused {
+                    format!("▶ {label}")
+                } else {
+                    label
+                })
+                .on_click(cx.listener(move |this, _event, _window, cx| {
+                    this.focused_pane_id = pane_id;
+                    cx.notify();
+                }))
+                .into_any_element()
+        }
+        PaneNode::Split {
+            axis,
+            first,
+            second,
+        } => {
+            let container = div().flex().flex_1();
+            let container = match axis {
+                SplitAxis::Horizontal => container,
+                SplitAxis::Vertical => container.flex_col(),
+            };
+            container
+                .child(render_pane_node(first, focused_pane_id, cx))
+                .child(render_pane_node(second, focused_pane_id, cx))
+                .into_any_element()
+        }
+    }
+}
+
+impl Render for WorkspacePrototype {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let visible_session_count = self
+            .sessions
+            .iter()
+            .filter(|session_id| {
+                self.session_is_active(**session_id) && self.session_has_panes(**session_id)
+            })
+            .count();
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .child(
+                        div()
+                            .w(px(220.0))
+                            .h(px(32.0))
+                            .child("FinalShell — GPUI CE prototype"),
+                    )
+                    .child(
+                        div()
+                            .id("split-horizontal")
+                            .debug_selector(|| "split-horizontal".to_string())
+                            .w(px(110.0))
+                            .h(px(32.0))
+                            .child("  [Split H]  ")
+                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                this.split_focused(SplitAxis::Horizontal);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("split-vertical")
+                            .debug_selector(|| "split-vertical".to_string())
+                            .w(px(110.0))
+                            .h(px(32.0))
+                            .child("[Split V]  ")
+                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                this.split_focused(SplitAxis::Vertical);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("close-pane")
+                            .debug_selector(|| "close-pane".to_string())
+                            .w(px(110.0))
+                            .h(px(32.0))
+                            .child("[Close focused]")
+                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                if this.close_focused() {
+                                    cx.notify();
+                                }
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .child({
+                        let filtered_hosts = self.filtered_connection_hosts();
+                        let visible_count = filtered_hosts.len();
+                        let selected_host_id = self.selected_host_id;
+                        let workspace = cx.entity().clone();
+                        div()
+                            .flex()
+                            .flex_col()
+                            .w(px(220.0))
+                            .child("Connections")
+                            .child(
+                                div()
+                                    .flex()
+                                    .child(
+                                        div()
+                                            .id("connection-filter-all")
+                                            .debug_selector(|| "connection-filter-all".to_string())
+                                            .child(if self.connection_filter.is_empty() {
+                                                "[All]"
+                                            } else {
+                                                "All"
+                                            })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.set_connection_filter("");
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("connection-filter-production")
+                                            .debug_selector(|| {
+                                                "connection-filter-production".to_string()
+                                            })
+                                            .child(if self.connection_filter == "production" {
+                                                "[Prod]"
+                                            } else {
+                                                "Prod"
+                                            })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.set_connection_filter("production");
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("connection-filter-database")
+                                            .debug_selector(|| {
+                                                "connection-filter-database".to_string()
+                                            })
+                                            .child(if self.connection_filter == "database" {
+                                                "[DB]"
+                                            } else {
+                                                "DB"
+                                            })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.set_connection_filter("database");
+                                                cx.notify();
+                                            })),
+                                    ),
+                            )
+                            .child(
+                                list(
+                                    self.connection_list_state.clone(),
+                                    move |ix, _window, _app| {
+                                        let host = filtered_hosts[ix].clone();
+                                        let selected = selected_host_id == Some(host.id);
+                                        let workspace = workspace.clone();
+                                        div()
+                                            .id(format!("connection-host-{}", host.id))
+                                            .debug_selector(move || {
+                                                format!("connection-host-{}", host.id)
+                                            })
+                                            .h(px(26.0))
+                                            .px_1()
+                                            .child(if selected {
+                                                format!("▶ {}", host.name)
+                                            } else {
+                                                host.name
+                                            })
+                                            .on_click(move |_event, _window, app| {
+                                                workspace.update(app, |this, cx| {
+                                                    this.selected_host_id = Some(host.id);
+                                                    cx.notify();
+                                                });
+                                            })
+                                            .into_any_element()
+                                    },
+                                )
+                                .flex_1(),
+                            )
+                            .child(format!("{visible_count} / 1,000 hosts"))
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .child("Terminal workspace")
+                            .child(render_pane_node(&self.root, self.focused_pane_id, cx))
+                            .child({
+                                let filtered_files = self.filtered_files();
+                                let visible_count = filtered_files.len();
+                                let selected_file_id = self.selected_file_id;
+                                let workspace = cx.entity().clone();
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .h(px(220.0))
+                                    .child(format!("Files · {visible_count} / 10,000"))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .child(
+                                                div()
+                                                    .id("file-filter-all")
+                                                    .debug_selector(|| {
+                                                        "file-filter-all".to_string()
+                                                    })
+                                                    .child(if self.file_filter.is_empty() {
+                                                        "[All]"
+                                                    } else {
+                                                        "All"
+                                                    })
+                                                    .on_click(cx.listener(
+                                                        |this, _event, _window, cx| {
+                                                            this.set_file_filter("");
+                                                            cx.notify();
+                                                        },
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .id("file-filter-logs")
+                                                    .debug_selector(|| {
+                                                        "file-filter-logs".to_string()
+                                                    })
+                                                    .child(if self.file_filter == "log" {
+                                                        "[Logs]"
+                                                    } else {
+                                                        "Logs"
+                                                    })
+                                                    .on_click(cx.listener(
+                                                        |this, _event, _window, cx| {
+                                                            this.set_file_filter("log");
+                                                            cx.notify();
+                                                        },
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .id("file-filter-configs")
+                                                    .debug_selector(|| {
+                                                        "file-filter-configs".to_string()
+                                                    })
+                                                    .child(if self.file_filter == "config" {
+                                                        "[Configs]"
+                                                    } else {
+                                                        "Configs"
+                                                    })
+                                                    .on_click(cx.listener(
+                                                        |this, _event, _window, cx| {
+                                                            this.set_file_filter("config");
+                                                            cx.notify();
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                    .child(
+                                        list(
+                                            self.file_list_state.clone(),
+                                            move |ix, _window, _app| {
+                                                let file = filtered_files[ix].clone();
+                                                let selected = selected_file_id == Some(file.id);
+                                                let workspace = workspace.clone();
+                                                div()
+                                                    .id(format!("file-entry-{}", file.id))
+                                                    .debug_selector(move || {
+                                                        format!("file-entry-{}", file.id)
+                                                    })
+                                                    .h(px(24.0))
+                                                    .px_1()
+                                                    .child(if selected {
+                                                        format!("▶ {}", file.name)
+                                                    } else {
+                                                        file.name
+                                                    })
+                                                    .on_click(move |_event, _window, app| {
+                                                        workspace.update(app, |this, cx| {
+                                                            this.selected_file_id = Some(file.id);
+                                                            cx.notify();
+                                                        });
+                                                    })
+                                                    .into_any_element()
+                                            },
+                                        )
+                                        .flex_1(),
+                                    )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .w(px(220.0))
+                            .child("Monitor")
+                            .child(
+                                div()
+                                    .flex()
+                                    .child(
+                                        div()
+                                            .id("monitor-overview")
+                                            .child(if self.monitor_tab == MonitorTab::Overview {
+                                                "[Overview]"
+                                            } else {
+                                                "Overview"
+                                            })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.select_monitor(MonitorTab::Overview);
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("monitor-network")
+                                            .debug_selector(|| "monitor-network".to_string())
+                                            .child(if self.monitor_tab == MonitorTab::Network {
+                                                "[Network]"
+                                            } else {
+                                                "Network"
+                                            })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.select_monitor(MonitorTab::Network);
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("monitor-processes")
+                                            .debug_selector(|| "monitor-processes".to_string())
+                                            .child(if self.monitor_tab == MonitorTab::Processes {
+                                                "[Processes]"
+                                            } else {
+                                                "Processes"
+                                            })
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                this.select_monitor(MonitorTab::Processes);
+                                                cx.notify();
+                                            })),
+                                    ),
+                            )
+                            .child(match self.monitor_tab {
+                                MonitorTab::Overview => {
+                                    "CPU 12.4% · Memory 4.2 / 16 GB · Uptime 12 days"
+                                }
+                                MonitorTab::Network => "RX 1.8 MB/s · TX 420 KB/s · Interface eth0",
+                                MonitorTab::Processes => "1024 sshd · 1180 bash · 2201 nginx",
+                            }),
+                    ),
+            )
+            .child(div().child("Quick command — local mock only; no SSH"))
+            .child(div().child(format!(
+                "{} panes / {} active sessions",
+                self.root.leaf_count(),
+                visible_session_count
+            )))
+    }
+}
+
+fn main() {
+    gpui_platform::application()
+        .with_quit_mode(QuitMode::LastWindowClosed)
+        .run(|cx: &mut App| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|_| WorkspacePrototype::default())
+            })
+            .expect("failed to open GPUI workspace window");
+            cx.activate(true);
+        });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{ListOffset, Modifiers, MouseButton, TestApp, TestAppContext, point};
+
+    #[test]
+    fn monitor_tabs_select_the_matching_panel_content() {
+        let mut app = WorkspacePrototype::default();
+        assert_eq!(app.monitor_tab, MonitorTab::Overview);
+
+        app.select_monitor(MonitorTab::Network);
+        assert_eq!(app.monitor_tab, MonitorTab::Network);
+
+        app.select_monitor(MonitorTab::Processes);
+        assert_eq!(app.monitor_tab, MonitorTab::Processes);
+    }
+
+    #[gpui::test]
+    fn headless_ui_monitor_tabs_change_the_rendered_panel(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        let network_bounds = cx
+            .debug_bounds("monitor-network")
+            .expect("network tab should have rendered bounds");
+        cx.simulate_click(network_bounds.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.monitor_tab, MonitorTab::Network);
+        });
+
+        let processes_bounds = cx
+            .debug_bounds("monitor-processes")
+            .expect("processes tab should have rendered bounds");
+        cx.simulate_click(processes_bounds.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.monitor_tab, MonitorTab::Processes);
+        });
+    }
+
+    #[test]
+    fn splitting_creates_a_new_pane_view_for_the_same_session() {
+        let mut app = WorkspacePrototype::default();
+
+        app.split_focused(SplitAxis::Horizontal);
+
+        let panes = app.panes();
+        assert_eq!(panes.len(), 2);
+        assert_eq!(panes[0].session_id, panes[1].session_id);
+        assert_ne!(panes[0].pane_id, panes[1].pane_id);
+        assert_eq!(app.sessions.len(), 1);
+    }
+
+    #[test]
+    fn closing_one_shared_pane_keeps_the_other_pane_and_session_alive() {
+        let mut app = WorkspacePrototype::default();
+        app.split_focused(SplitAxis::Horizontal);
+        let session_id = app.panes()[0].session_id;
+
+        assert!(app.close_focused());
+
+        let remaining = app.panes();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].session_id, session_id);
+        assert!(app.session_is_active(session_id));
+        assert!(app.session_has_panes(session_id));
+    }
+
+    #[test]
+    fn closing_the_last_pane_is_rejected() {
+        let mut app = WorkspacePrototype::default();
+
+        assert!(!app.close_focused());
+        assert_eq!(app.root.leaf_count(), 1);
+        assert_eq!(app.sessions.len(), 1);
+    }
+
+    #[test]
+    fn nested_splits_collapse_without_losing_sibling_panes() {
+        let mut app = WorkspacePrototype::default();
+        app.split_focused(SplitAxis::Horizontal);
+        app.split_focused(SplitAxis::Vertical);
+        app.split_focused(SplitAxis::Horizontal);
+
+        assert_eq!(app.root.leaf_count(), 4);
+        assert!(app.close_focused());
+        assert_eq!(app.root.leaf_count(), 3);
+        assert_eq!(app.panes().len(), 3);
+    }
+
+    #[test]
+    fn headless_ui_split_and_close_buttons_change_the_rendered_workspace() {
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| WorkspacePrototype::default());
+
+        window.draw();
+        window.simulate_click(point(px(275.0), px(16.0)), MouseButton::Left);
+        window.read(|workspace, _| {
+            assert_eq!(workspace.root.leaf_count(), 2);
+            assert_eq!(
+                workspace.panes()[0].session_id,
+                workspace.panes()[1].session_id
+            );
+        });
+
+        window.draw();
+        window.simulate_click(point(px(385.0), px(16.0)), MouseButton::Left);
+        window.read(|workspace, _| assert_eq!(workspace.root.leaf_count(), 3));
+
+        window.draw();
+        window.simulate_click(point(px(495.0), px(16.0)), MouseButton::Left);
+        window.read(|workspace, _| {
+            assert_eq!(workspace.root.leaf_count(), 2);
+            assert_eq!(workspace.sessions.len(), 1);
+            assert!(workspace.session_is_active(101));
+        });
+    }
+
+    #[gpui::test]
+    fn headless_ui_connection_filters_and_host_selection_are_interactive(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        workspace.update(cx, |workspace, _| {
+            workspace.selected_host_id = Some(1);
+        });
+
+        let database_filter = cx
+            .debug_bounds("connection-filter-database")
+            .expect("database filter should have rendered bounds");
+        cx.simulate_click(database_filter.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.connection_filter, "database");
+            assert_eq!(workspace.selected_host_id, None);
+            assert_eq!(workspace.filtered_connection_hosts().len(), 333);
+        });
+
+        let all_filter = cx
+            .debug_bounds("connection-filter-all")
+            .expect("all filter should have rendered bounds");
+        cx.simulate_click(all_filter.center(), Modifiers::default());
+
+        let host_bounds = cx
+            .debug_bounds("connection-host-4")
+            .expect("production host 4 should be visible in the connection list");
+        cx.simulate_click(host_bounds.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.selected_host_id, Some(4));
+        });
+
+        let production_filter = cx
+            .debug_bounds("connection-filter-production")
+            .expect("production filter should have rendered bounds");
+        cx.simulate_click(production_filter.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.connection_filter, "production");
+            assert_eq!(workspace.selected_host_id, Some(4));
+            assert!(
+                workspace
+                    .filtered_connection_hosts()
+                    .iter()
+                    .any(|host| host.id == 4)
+            );
+        });
+
+        let database_filter = cx
+            .debug_bounds("connection-filter-database")
+            .expect("database filter should remain interactive");
+        cx.simulate_click(database_filter.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.connection_filter, "database");
+            assert_eq!(workspace.selected_host_id, None);
+        });
+    }
+
+    #[test]
+    fn connection_tree_filters_and_preserves_selection_by_host_id() {
+        let mut app = WorkspacePrototype::default();
+        assert_eq!(app.connection_hosts.len(), 1_000);
+        app.selected_host_id = Some(1);
+        app.set_connection_filter("database");
+        let filtered = app.filtered_connection_hosts();
+        assert_eq!(filtered.len(), 333);
+        assert!(filtered.iter().all(|host| host.group == "database"));
+        assert_eq!(app.selected_host_id, None);
+
+        app.set_connection_filter("");
+        app.selected_host_id = Some(4);
+        app.set_connection_filter("production");
+        assert_eq!(app.selected_host_id, Some(4));
+        assert!(
+            app.filtered_connection_hosts()
+                .iter()
+                .any(|host| host.id == 4)
+        );
+    }
+
+    #[test]
+    fn connection_selection_uses_stable_host_identity() {
+        let mut app = WorkspacePrototype::default();
+        let host_id = app.connection_hosts[3].id;
+        assert_eq!(host_id, 4);
+        app.selected_host_id = Some(host_id);
+        app.set_connection_filter("production");
+        let filtered = app.filtered_connection_hosts();
+        let filtered_index = filtered
+            .iter()
+            .position(|host| host.id == host_id)
+            .expect("selected host should remain in the filtered list");
+
+        assert_eq!(app.selected_host_id, Some(host_id));
+        assert_eq!(filtered_index, 1);
+        assert_eq!(filtered[filtered_index].id, host_id);
+    }
+
+    #[test]
+    fn file_list_filters_and_preserves_selection_by_file_id() {
+        let mut app = WorkspacePrototype::default();
+        assert_eq!(app.files.len(), 10_000);
+
+        app.selected_file_id = Some(4);
+        app.set_file_filter("log");
+        let logs = app.filtered_files();
+        assert_eq!(logs.len(), 3_333);
+        assert!(logs.iter().all(|file| file.kind == "log"));
+        assert_eq!(app.selected_file_id, None);
+
+        app.set_file_filter("");
+        app.selected_file_id = Some(4);
+        app.set_file_filter("config");
+        let configs = app.filtered_files();
+        assert_eq!(configs.len(), 3_334);
+        assert!(configs.iter().all(|file| file.kind == "config"));
+        assert_eq!(app.selected_file_id, Some(4));
+    }
+
+    #[test]
+    fn file_selection_uses_stable_identity_after_filtering() {
+        let mut app = WorkspacePrototype::default();
+        app.selected_file_id = Some(4);
+        app.set_file_filter("config");
+        let filtered = app.filtered_files();
+        let selected_index = filtered
+            .iter()
+            .position(|file| file.id == 4)
+            .expect("selected config file should remain visible");
+        assert_eq!(selected_index, 1);
+        assert_eq!(filtered[selected_index].id, 4);
+        assert_eq!(app.selected_file_id, Some(4));
+    }
+
+    #[gpui::test]
+    fn headless_ui_file_filters_and_selection_are_interactive(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        workspace.update(cx, |workspace, _| {
+            workspace.selected_file_id = Some(4);
+        });
+
+        let logs_filter = cx
+            .debug_bounds("file-filter-logs")
+            .expect("logs filter should have rendered bounds");
+        cx.simulate_click(logs_filter.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.file_filter, "log");
+            assert_eq!(workspace.selected_file_id, None);
+            assert_eq!(workspace.filtered_files().len(), 3_333);
+        });
+
+        let all_filter = cx
+            .debug_bounds("file-filter-all")
+            .expect("all files filter should have rendered bounds");
+        cx.simulate_click(all_filter.center(), Modifiers::default());
+
+        let file_bounds = cx
+            .debug_bounds("file-entry-4")
+            .expect("file 4 should be rendered in the virtualized list");
+        cx.simulate_click(file_bounds.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.selected_file_id, Some(4));
+        });
+
+        let configs_filter = cx
+            .debug_bounds("file-filter-configs")
+            .expect("configs filter should have rendered bounds");
+        cx.simulate_click(configs_filter.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.file_filter, "config");
+            assert_eq!(workspace.selected_file_id, Some(4));
+            assert_eq!(workspace.filtered_files().len(), 3_334);
+        });
+
+        let logs_filter = cx
+            .debug_bounds("file-filter-logs")
+            .expect("logs filter should remain interactive");
+        cx.simulate_click(logs_filter.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.file_filter, "log");
+            assert_eq!(workspace.selected_file_id, None);
+        });
+    }
+
+    #[gpui::test]
+    fn headless_ui_file_list_scrolls_to_distant_virtualized_rows(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.file_list_state.scroll_to(ListOffset {
+                item_ix: 9_000,
+                offset_in_item: px(0.0),
+            });
+            cx.notify();
+        });
+
+        let distant_file = cx
+            .debug_bounds("file-entry-9001")
+            .expect("file 9001 should render after scrolling to its virtualized range");
+        cx.simulate_click(distant_file.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            let offset = workspace.file_list_state.logical_scroll_top();
+            assert_eq!(offset.item_ix, 9_000);
+            assert_eq!(workspace.selected_file_id, Some(9_001));
+        });
+    }
+
+    #[gpui::test]
+    fn headless_ui_connection_tree_scrolls_to_distant_hosts(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.connection_list_state.scroll_to(ListOffset {
+                item_ix: 900,
+                offset_in_item: px(0.0),
+            });
+            cx.notify();
+        });
+
+        let distant_host = cx
+            .debug_bounds("connection-host-901")
+            .expect("host 901 should render after scrolling to its virtualized range");
+        cx.simulate_click(distant_host.center(), gpui::Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            let offset = workspace.connection_list_state.logical_scroll_top();
+            assert_eq!(offset.item_ix, 900);
+            assert_eq!(workspace.selected_host_id, Some(901));
+        });
+    }
+
+    #[gpui::test]
+    fn headless_ui_pane_focus_and_close_preserve_session_lifecycle(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        let split_button = cx
+            .debug_bounds("split-horizontal")
+            .expect("horizontal split button should be rendered");
+        cx.simulate_click(split_button.center(), gpui::Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.root.leaf_count(), 2);
+            assert_eq!(workspace.sessions.len(), 1);
+            assert_eq!(workspace.focused_pane_id, 2);
+        });
+
+        let first_pane = cx
+            .debug_bounds("pane-1")
+            .expect("first pane should be rendered");
+        cx.simulate_click(first_pane.center(), gpui::Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.focused_pane_id, 1);
+        });
+
+        let close_button = cx
+            .debug_bounds("close-pane")
+            .expect("close button should be rendered");
+        cx.simulate_click(close_button.center(), gpui::Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            let panes = workspace.panes();
+            assert_eq!(panes.len(), 1);
+            assert_eq!(panes[0].pane_id, 2);
+            assert_eq!(panes[0].session_id, 101);
+            assert!(workspace.session_is_active(101));
+            assert_eq!(workspace.sessions.len(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn headless_ui_nested_split_layout_and_collapse_preserve_sessions(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        let horizontal_split = cx
+            .debug_bounds("split-horizontal")
+            .expect("horizontal split control should be rendered");
+        cx.simulate_click(horizontal_split.center(), Modifiers::default());
+
+        let vertical_split = cx
+            .debug_bounds("split-vertical")
+            .expect("vertical split control should be rendered");
+        cx.simulate_click(vertical_split.center(), Modifiers::default());
+
+        let second_pane = cx
+            .debug_bounds("pane-2")
+            .expect("second pane should be rendered");
+        let third_pane = cx
+            .debug_bounds("pane-3")
+            .expect("third pane should be rendered");
+
+        assert!(second_pane.origin.y < third_pane.origin.y);
+        assert!((second_pane.origin.x - third_pane.origin.x).abs() < px(1.0));
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.root.leaf_count(), 3);
+            assert_eq!(workspace.sessions.len(), 1);
+            assert_eq!(workspace.focused_pane_id, 3);
+            assert!(workspace.panes().iter().all(|pane| pane.session_id == 101));
+        });
+
+        let close_button = cx
+            .debug_bounds("close-pane")
+            .expect("close control should be rendered");
+        cx.simulate_click(close_button.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            let panes = workspace.panes();
+            assert_eq!(panes.len(), 2);
+            assert_eq!(
+                panes.iter().map(|pane| pane.pane_id).collect::<Vec<_>>(),
+                [1, 2]
+            );
+            assert!(panes.iter().all(|pane| pane.session_id == 101));
+            assert!(workspace.session_is_active(101));
+            assert_eq!(workspace.sessions.len(), 1);
+        });
+    }
+
+    #[test]
+    fn filtering_a_scrolled_file_list_resets_its_virtual_window() {
+        let mut app = WorkspacePrototype::default();
+        app.file_list_state.scroll_to(ListOffset {
+            item_ix: 9_000,
+            offset_in_item: px(0.0),
+        });
+        assert_eq!(app.file_list_state.logical_scroll_top().item_ix, 9_000);
+
+        app.set_file_filter("log");
+
+        assert_eq!(app.filtered_files().len(), 3_333);
+        assert_eq!(app.file_list_state.logical_scroll_top().item_ix, 0);
+    }
+
+    #[test]
+    fn mock_dataset_sizes_match_the_comparison_contract() {
+        let connection_ids = (0..1_000_u64).collect::<Vec<_>>();
+        let file_ids = (0..10_000_u64).collect::<Vec<_>>();
+        assert_eq!(connection_ids.len(), 1_000);
+        assert_eq!(file_ids.len(), 10_000);
+    }
+
+    #[test]
+    fn pane_ids_remain_monotonic_after_close_and_resplit() {
+        let mut app = WorkspacePrototype::default();
+
+        app.split_focused(SplitAxis::Horizontal);
+        assert_eq!(
+            app.panes()
+                .iter()
+                .map(|pane| pane.pane_id)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+
+        assert!(app.close_focused());
+        app.split_focused(SplitAxis::Vertical);
+
+        assert_eq!(
+            app.panes()
+                .iter()
+                .map(|pane| pane.pane_id)
+                .collect::<Vec<_>>(),
+            [1, 3]
+        );
+        assert_eq!(app.next_pane_id, 4);
+        assert_eq!(app.focused_pane_id, 3);
+    }
+
+    #[test]
+    fn removing_nested_leaf_preserves_the_other_split_branch() {
+        let mut app = WorkspacePrototype::default();
+        app.split_focused(SplitAxis::Horizontal);
+        app.split_focused(SplitAxis::Vertical);
+
+        assert!(app.close_focused());
+
+        assert!(matches!(
+            app.root,
+            PaneNode::Split {
+                axis: SplitAxis::Horizontal,
+                ..
+            }
+        ));
+        assert_eq!(
+            app.panes()
+                .iter()
+                .map(|pane| pane.pane_id)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        assert_eq!(app.focused_pane_id, 1);
+        assert_eq!(app.sessions, BTreeSet::from([101]));
+    }
+
+    #[test]
+    fn connection_filter_is_case_insensitive_and_resets_virtual_scroll() {
+        let mut app = WorkspacePrototype::default();
+        app.selected_host_id = Some(901);
+        app.connection_list_state.scroll_to(ListOffset {
+            item_ix: 900,
+            offset_in_item: px(0.0),
+        });
+
+        app.set_connection_filter("DATABASE");
+
+        let filtered = app.filtered_connection_hosts();
+        assert_eq!(app.connection_filter, "database");
+        assert_eq!(filtered.len(), 333);
+        assert!(filtered.iter().all(|host| host.group == "database"));
+        assert_eq!(app.selected_host_id, None);
+        assert_eq!(app.connection_list_state.logical_scroll_top().item_ix, 0);
+
+        app.set_connection_filter("no-such-host");
+        assert!(app.filtered_connection_hosts().is_empty());
+        assert_eq!(app.connection_list_state.logical_scroll_top().item_ix, 0);
+    }
+
+    #[test]
+    fn file_filter_handles_unknown_categories_and_clears_stale_selection() {
+        let mut app = WorkspacePrototype::default();
+        app.selected_file_id = Some(9_001);
+        app.file_list_state.scroll_to(ListOffset {
+            item_ix: 9_000,
+            offset_in_item: px(0.0),
+        });
+
+        app.set_file_filter("UNKNOWN");
+
+        assert_eq!(app.file_filter, "unknown");
+        assert!(app.filtered_files().is_empty());
+        assert_eq!(app.selected_file_id, None);
+        assert_eq!(app.file_list_state.logical_scroll_top().item_ix, 0);
+    }
+
+    #[gpui::test]
+    fn headless_ui_focus_and_close_preserve_unfocused_split_branch(cx: &mut TestAppContext) {
+        let (workspace, cx) = cx.add_window_view(|_, _| WorkspacePrototype::default());
+
+        let horizontal_split = cx
+            .debug_bounds("split-horizontal")
+            .expect("horizontal split control should be rendered");
+        cx.simulate_click(horizontal_split.center(), Modifiers::default());
+
+        let vertical_split = cx
+            .debug_bounds("split-vertical")
+            .expect("vertical split control should be rendered");
+        cx.simulate_click(vertical_split.center(), Modifiers::default());
+
+        let second_pane = cx
+            .debug_bounds("pane-2")
+            .expect("second pane should be rendered");
+        cx.simulate_click(second_pane.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.focused_pane_id, 2);
+        });
+
+        let close_button = cx
+            .debug_bounds("close-pane")
+            .expect("close control should be rendered");
+        cx.simulate_click(close_button.center(), Modifiers::default());
+
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(
+                workspace
+                    .panes()
+                    .iter()
+                    .map(|pane| pane.pane_id)
+                    .collect::<Vec<_>>(),
+                [1, 3]
+            );
+            assert_eq!(workspace.focused_pane_id, 1);
+            assert!(workspace.panes().iter().all(|pane| pane.session_id == 101));
+            assert!(workspace.session_is_active(101));
+        });
+    }
+}
