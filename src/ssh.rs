@@ -262,9 +262,7 @@ pub struct SshClient {
 }
 
 trait SshTransport: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
-impl<T> SshTransport for T where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
-{}
+impl<T> SshTransport for T where T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
 
 impl SshClient {
     pub async fn connect(
@@ -316,12 +314,8 @@ impl SshClient {
             let connect = async {
                 match host.proxy.as_ref().filter(|proxy| !proxy.kind.is_empty()) {
                     None => {
-                        client::connect(
-                            Arc::new(config),
-                            (host.addr.as_str(), port),
-                            verifier,
-                        )
-                        .await
+                        client::connect(Arc::new(config), (host.addr.as_str(), port), verifier)
+                            .await
                     }
                     Some(proxy) => {
                         let stream: Box<dyn SshTransport> = match proxy.kind.as_str() {
@@ -351,9 +345,7 @@ impl SshClient {
                                         proxy.jump_host
                                     ))
                                 })?;
-                                if !proxy.jump_host.is_empty()
-                                    && jump.host.id != proxy.jump_host
-                                {
+                                if !proxy.jump_host.is_empty() && jump.host.id != proxy.jump_host {
                                     return Err(SshError::Proxy(format!(
                                         "configured Jump Host ID {} does not match required ID {}",
                                         jump.host.id, proxy.jump_host
@@ -414,9 +406,7 @@ impl SshClient {
                         .await?
                         .success()
                 }
-                (AUTH_AGENT, _) => {
-                    authenticate_agent(&mut handle, &host.user).await?.success()
-                }
+                (AUTH_AGENT, _) => authenticate_agent(&mut handle, &host.user).await?.success(),
                 (AUTH_KEYBOARD_INTERACTIVE, SshCredentials::KeyboardInteractive) => {
                     authenticate_keyboard_interactive(
                         &mut handle,
