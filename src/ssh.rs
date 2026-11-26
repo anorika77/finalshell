@@ -3,7 +3,11 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use russh::{
     Channel, Disconnect,
     client::{self, Handler},
-    keys::{self, PrivateKeyWithHashAlg, agent::{AgentIdentity, client::AgentClient}, known_hosts},
+    keys::{
+        self, PrivateKeyWithHashAlg,
+        agent::{AgentIdentity, client::AgentClient},
+        known_hosts,
+    },
 };
 
 use crate::config::{AUTH_AGENT, AUTH_KEY, AUTH_PASSWORD, Host};
@@ -349,12 +353,16 @@ async fn authenticate_agent(
     for identity in identities {
         let hash = handle.best_supported_rsa_hash().await?.flatten();
         let result = match identity {
-            AgentIdentity::PublicKey { key, .. } => handle
-                .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
-                .await,
-            AgentIdentity::Certificate { certificate, .. } => handle
-                .authenticate_certificate_with(user.to_owned(), certificate, hash, &mut agent)
-                .await,
+            AgentIdentity::PublicKey { key, .. } => {
+                handle
+                    .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
+                    .await
+            }
+            AgentIdentity::Certificate { certificate, .. } => {
+                handle
+                    .authenticate_certificate_with(user.to_owned(), certificate, hash, &mut agent)
+                    .await
+            }
         }
         .map_err(|error| {
             SshError::UnsupportedAuthentication(format!("SSH agent signing failed: {error}"))
@@ -389,12 +397,16 @@ async fn authenticate_agent(
     for identity in identities {
         let hash = handle.best_supported_rsa_hash().await?.flatten();
         let result = match identity {
-            AgentIdentity::PublicKey { key, .. } => handle
-                .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
-                .await,
-            AgentIdentity::Certificate { certificate, .. } => handle
-                .authenticate_certificate_with(user.to_owned(), certificate, hash, &mut agent)
-                .await,
+            AgentIdentity::PublicKey { key, .. } => {
+                handle
+                    .authenticate_publickey_with(user.to_owned(), key, hash, &mut agent)
+                    .await
+            }
+            AgentIdentity::Certificate { certificate, .. } => {
+                handle
+                    .authenticate_certificate_with(user.to_owned(), certificate, hash, &mut agent)
+                    .await
+            }
         }
         .map_err(|error| {
             SshError::UnsupportedAuthentication(format!("SSH agent signing failed: {error}"))
