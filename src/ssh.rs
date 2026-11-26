@@ -283,8 +283,11 @@ impl SshClient {
                                 .await?
                         }
                         "http" => {
-                            dial_http_connect(proxy, options.proxy_password.as_deref(), &host.addr, port)
-                                .await?
+                            dial_http_connect(
+                                proxy,
+                                options.proxy_password.as_deref(),
+                                &host.addr,
+                                port,
                             )
                             .await?
                         }
@@ -407,7 +410,6 @@ impl SshClient {
         Ok(())
     }
 }
-
 
 async fn dial_socks5(
     proxy: &crate::config::ProxyConfig,
