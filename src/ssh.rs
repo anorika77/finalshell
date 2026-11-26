@@ -180,7 +180,6 @@ pub(crate) struct HostKeyVerifier {
     prompt: Option<tokio::sync::mpsc::Sender<HostKeyPrompt>>,
     prompt_timeout: Duration,
     remote_forward_routes: RemoteForwardRoutes,
-    tunnels: tokio::sync::Mutex<Vec<ManagedTunnel>>,
 }
 
 impl Handler for HostKeyVerifier {
@@ -298,6 +297,7 @@ pub struct SshClient {
     port: u16,
     jump_chain: Vec<SshClient>,
     remote_forward_routes: RemoteForwardRoutes,
+    tunnels: tokio::sync::Mutex<Vec<ManagedTunnel>>,
 }
 
 trait SshTransport: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
