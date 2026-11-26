@@ -74,6 +74,7 @@ pub struct ForwardHandle {
     counters: Arc<Counters>,
     shutdown: watch::Sender<bool>,
     task: Option<JoinHandle<()>>,
+    remote_cancel: Option<RemoteCancel>,
 }
 
 impl ForwardHandle {
@@ -94,6 +95,10 @@ impl ForwardHandle {
         let _ = self.shutdown.send(true);
         if let Some(task) = self.task.take() {
             let _ = task.await;
+        }
+        if let Some(remote) = self.remote_cancel.take() {
+            remote.routes.lock().await.remove(&remote.route_key);
+            let _ = remote.handle.cancel_tcpip_forward(remote.address, remote.port as u32).await;
         }
     }
 }
@@ -124,6 +129,7 @@ pub(crate) async fn start(handle: SshHandle, spec: ForwardSpec) -> Result<Forwar
         counters,
         shutdown,
         task: Some(task),
+        remote_cancel: None,
     })
 }
 
@@ -320,5 +326,150 @@ mod tests {
         assert_eq!(dynamic.kind, ForwardKind::Dynamic);
         assert!(dynamic.target_host.is_none());
         assert!(dynamic.target_port.is_none());
+    }
+
+    #[test]
+    fn remote_forward_listen_host_must_be_an_ip_or_localhost() {
+        assert_eq!(remote_listen_ip(\"localhost\").unwrap(), \"127.0.0.1\".parse().unwrap());
+        assert_eq!(remote_listen_ip(\"::1\").unwrap(), \"::1\".parse().unwrap());
+        assert!(remote_listen_ip(\"remote.example\").is_err());
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteForwardSpec {
+    pub listen_host: String,
+    pub listen_port: u16,
+    pub target_host: String,
+    pub target_port: u16,
+}
+
+struct RemoteCancel {
+    handle: SshHandle,
+    routes: crate::ssh::RemoteForwardRoutes,
+    address: String,
+    port: u16,
+    route_key: u16,
+}
+
+fn remote_listen_ip(host: &str) -> Result<std::net::IpAddr, SshError> {
+    let host = if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
+        "127.0.0.1"
+    } else {
+        host
+    };
+    host.parse::<std::net::IpAddr>().map_err(|_| {
+        SshError::Proxy("remote forwarding listen host must be an IP address or localhost".into())
+    })
+}
+
+pub(crate) async fn start_remote(
+    handle: SshHandle,
+    routes: crate::ssh::RemoteForwardRoutes,
+    spec: RemoteForwardSpec,
+) -> Result<ForwardHandle, SshError> {
+    if spec.target_host.is_empty() || spec.target_port == 0 {
+        return Err(SshError::Proxy(
+            "remote forwarding requires a target host and non-zero port".into(),
+        ));
+    }
+    let listen_ip = remote_listen_ip(&spec.listen_host)?;
+    let address = listen_ip.to_string();
+    let route_key = spec.listen_port;
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    {
+        let mut registered = routes.lock().await;
+        if registered.contains_key(&route_key) {
+            return Err(SshError::Proxy(format!(
+                "a remote forwarding is already registered for port {}",
+                route_key
+            )));
+        }
+        registered.insert(route_key, sender.clone());
+    }
+
+    let actual_port = match handle.tcpip_forward(address.clone(), spec.listen_port as u32).await {
+        Ok(port) if port > 0 && port <= u16::MAX as u32 => port as u16,
+        Ok(_) => {
+            routes.lock().await.remove(&route_key);
+            return Err(SshError::Proxy("SSH server returned an invalid remote port".into()));
+        }
+        Err(error) => {
+            routes.lock().await.remove(&route_key);
+            return Err(SshError::Transport(error));
+        }
+    };
+
+    if route_key == 0 {
+        let mut registered = routes.lock().await;
+        registered.remove(&0);
+        if registered.contains_key(&actual_port) {
+            drop(registered);
+            let _ = handle.cancel_tcpip_forward(address, actual_port as u32).await;
+            return Err(SshError::Proxy(format!(
+                "remote forwarding port {actual_port} is already registered"
+            )));
+        }
+        registered.insert(actual_port, sender);
+    }
+
+    let counters = Arc::new(Counters::default());
+    let (shutdown, rx) = watch::channel(false);
+    let task_counters = counters.clone();
+    let target_host = spec.target_host;
+    let target_port = spec.target_port;
+    let task = tokio::spawn(async move {
+        remote_accept_loop(receiver, target_host, target_port, task_counters, rx).await;
+    });
+    Ok(ForwardHandle {
+        addr: SocketAddr::new(listen_ip, actual_port),
+        counters,
+        shutdown,
+        task: Some(task),
+        remote_cancel: Some(RemoteCancel {
+            handle,
+            routes,
+            address,
+            port: actual_port,
+            route_key: actual_port,
+        }),
+    })
+}
+
+async fn remote_accept_loop(
+    mut receiver: tokio::sync::mpsc::UnboundedReceiver<Channel<client::Msg>>,
+    target_host: String,
+    target_port: u16,
+    counters: Arc<Counters>,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    loop {
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    break;
+                }
+            }
+            incoming = receiver.recv() => match incoming {
+                Some(channel) => {
+                    counters.total.fetch_add(1, Ordering::Relaxed);
+                    counters.active.fetch_add(1, Ordering::Relaxed);
+                    let host = target_host.clone();
+                    let counters = counters.clone();
+                    tokio::spawn(async move {
+                        let _active = ActiveGuard(counters.clone());
+                        let Ok(mut local) = TcpStream::connect((host.as_str(), target_port)).await else {
+                            return;
+                        };
+                        let mut remote = channel.into_stream();
+                        if let Ok((up, down)) = copy_bidirectional(&mut remote, &mut local).await {
+                            counters.uploaded.fetch_add(up, Ordering::Relaxed);
+                            counters.downloaded.fetch_add(down, Ordering::Relaxed);
+                        }
+                    });
+                }
+                None => break,
+            }
+        }
     }
 }

@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -16,6 +16,8 @@ use russh::{
 };
 
 use crate::config::{AUTH_AGENT, AUTH_KEY, AUTH_KEYBOARD_INTERACTIVE, AUTH_PASSWORD, Host};
+
+pub(crate) type RemoteForwardRoutes = Arc<tokio::sync::Mutex<HashMap<u16, tokio::sync::mpsc::UnboundedSender<Channel<client::Msg>>>>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostKeyPolicy {
@@ -176,6 +178,7 @@ pub(crate) struct HostKeyVerifier {
     policy: HostKeyPolicy,
     prompt: Option<tokio::sync::mpsc::Sender<HostKeyPrompt>>,
     prompt_timeout: Duration,
+    remote_forward_routes: RemoteForwardRoutes,
 }
 
 impl Handler for HostKeyVerifier {
@@ -254,6 +257,32 @@ impl Handler for HostKeyVerifier {
             }
         }
     }
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: Channel<client::Msg>,
+        _connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: client::ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let sender = {
+            let routes = self.remote_forward_routes.lock().await;
+            u16::try_from(connected_port)
+                .ok()
+                .and_then(|port| routes.get(&port).or_else(|| routes.get(&0)).cloned())
+        };
+        if let Some(sender) = sender {
+            reply.accept().await;
+            sender.send(channel).map_err(|_| {
+                SshError::Proxy("remote forwarding receiver has been closed".into())
+            })?;
+        }
+        Ok(())
+    }
+
 }
 
 pub struct SshClient {
@@ -261,6 +290,7 @@ pub struct SshClient {
     host: String,
     port: u16,
     jump_chain: Vec<SshClient>,
+    remote_forward_routes: RemoteForwardRoutes,
 }
 
 trait SshTransport: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
@@ -298,6 +328,7 @@ impl SshClient {
             }
 
             let port = host.port_or_22();
+            let remote_forward_routes = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
             let verifier = HostKeyVerifier {
                 host: host.addr.clone(),
                 port,
@@ -305,6 +336,7 @@ impl SshClient {
                 policy: options.host_key_policy,
                 prompt: options.host_key_prompt.clone(),
                 prompt_timeout: options.host_key_prompt_timeout,
+                remote_forward_routes: remote_forward_routes.clone(),
             };
             let config = client::Config {
                 keepalive_interval: options.keepalive_interval,
@@ -432,6 +464,7 @@ impl SshClient {
                 host: host.addr.clone(),
                 port,
                 jump_chain,
+                remote_forward_routes,
             })
         })
     }
@@ -445,6 +478,18 @@ impl SshClient {
         spec: crate::forward::ForwardSpec,
     ) -> Result<crate::forward::ForwardHandle, SshError> {
         crate::forward::start(self.forwarding_handle(), spec).await
+    }
+
+    pub async fn start_remote_forward(
+        &self,
+        spec: crate::forward::RemoteForwardSpec,
+    ) -> Result<crate::forward::ForwardHandle, SshError> {
+        crate::forward::start_remote(
+            self.handle.clone(),
+            self.remote_forward_routes.clone(),
+            spec,
+        )
+        .await
     }
 
     pub async fn open_sftp(&self) -> Result<russh_sftp::client::SftpSession, SshError> {
