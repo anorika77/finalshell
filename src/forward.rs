@@ -106,7 +106,6 @@ impl ForwardHandle {
     }
 }
 
-
 impl Drop for ForwardHandle {
     fn drop(&mut self) {
         let _ = self.shutdown.send(true);
