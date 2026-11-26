@@ -12,7 +12,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional},
     net::{TcpListener, TcpStream},
     sync::watch,
-    task::JoinHandle,
+    task::{JoinHandle, JoinSet},
 };
 
 use crate::ssh::{HostKeyVerifier, SshError};
@@ -106,6 +106,24 @@ impl ForwardHandle {
     }
 }
 
+
+impl Drop for ForwardHandle {
+    fn drop(&mut self) {
+        let _ = self.shutdown.send(true);
+        if let Some(remote) = self.remote_cancel.take()
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            runtime.spawn(async move {
+                remote.routes.lock().await.remove(&remote.route_key);
+                let _ = remote
+                    .handle
+                    .cancel_tcpip_forward(remote.address, remote.port as u32)
+                    .await;
+            });
+        }
+    }
+}
+
 pub(crate) async fn start(handle: SshHandle, spec: ForwardSpec) -> Result<ForwardHandle, SshError> {
     if spec.kind == ForwardKind::Local
         && (spec.target_host.as_deref().unwrap_or("").is_empty()
@@ -143,6 +161,7 @@ async fn accept_loop(
     counters: Arc<Counters>,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    let mut connections = JoinSet::new();
     loop {
         tokio::select! {
             changed = shutdown.changed() => {
@@ -150,6 +169,7 @@ async fn accept_loop(
                     break;
                 }
             }
+            _ = connections.join_next(), if !connections.is_empty() => {}
             accepted = listener.accept() => match accepted {
                 Ok((stream, peer)) => {
                     counters.total.fetch_add(1, Ordering::Relaxed);
@@ -159,7 +179,7 @@ async fn accept_loop(
                     let target = spec.target_host.clone();
                     let port = spec.target_port;
                     let kind = spec.kind;
-                    tokio::spawn(async move {
+                    connections.spawn(async move {
                         let _active = ActiveGuard(c.clone());
                         match kind {
                             ForwardKind::Local => {
@@ -175,6 +195,8 @@ async fn accept_loop(
             }
         }
     }
+    connections.abort_all();
+    while connections.join_next().await.is_some() {}
 }
 
 struct ActiveGuard(Arc<Counters>);
@@ -461,6 +483,7 @@ async fn remote_accept_loop(
     counters: Arc<Counters>,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    let mut connections = JoinSet::new();
     loop {
         tokio::select! {
             changed = shutdown.changed() => {
@@ -468,13 +491,14 @@ async fn remote_accept_loop(
                     break;
                 }
             }
+            _ = connections.join_next(), if !connections.is_empty() => {}
             incoming = receiver.recv() => match incoming {
                 Some(channel) => {
                     counters.total.fetch_add(1, Ordering::Relaxed);
                     counters.active.fetch_add(1, Ordering::Relaxed);
                     let host = target_host.clone();
                     let counters = counters.clone();
-                    tokio::spawn(async move {
+                    connections.spawn(async move {
                         let _active = ActiveGuard(counters.clone());
                         let Ok(mut local) = TcpStream::connect((host.as_str(), target_port)).await else {
                             return;
@@ -490,4 +514,6 @@ async fn remote_accept_loop(
             }
         }
     }
+    connections.abort_all();
+    while connections.join_next().await.is_some() {}
 }
