@@ -284,9 +284,7 @@ impl SshClient {
                     .await?
                     .success()
             }
-            (AUTH_AGENT, _) => authenticate_agent(&mut handle, &host.user)
-                .await?
-                .success(),
+            (AUTH_AGENT, _) => authenticate_agent(&mut handle, &host.user).await?.success(),
             (AUTH_KEYBOARD_INTERACTIVE, SshCredentials::KeyboardInteractive) => {
                 authenticate_keyboard_interactive(
                     &mut handle,
@@ -561,7 +559,10 @@ mod tests {
         assert_eq!(options.host_key_prompt_timeout, Duration::from_secs(120));
         assert!(options.host_key_prompt.is_none());
         assert!(options.keyboard_interactive_prompt.is_none());
-        assert_eq!(options.keyboard_interactive_timeout, Duration::from_secs(120));
+        assert_eq!(
+            options.keyboard_interactive_timeout,
+            Duration::from_secs(120)
+        );
     }
 
     #[test]
