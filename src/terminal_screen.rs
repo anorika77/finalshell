@@ -26,7 +26,10 @@ pub struct TerminalDecoder {
 
 impl TerminalDecoder {
     pub fn new(charset: TerminalCharset) -> Self {
-        Self { charset, decoder: None }
+        Self {
+            charset,
+            decoder: None,
+        }
     }
 
     pub fn set_charset(&mut self, charset: TerminalCharset) {
@@ -37,15 +40,24 @@ impl TerminalDecoder {
     }
 
     pub fn decode(&mut self, input: &[u8]) -> String {
-        let decoder = self.decoder.get_or_insert_with(|| self.charset.encoding().new_decoder());
-        let capacity = self.charset.encoding().max_utf8_buffer_length(input.len()).unwrap_or(input.len().saturating_mul(4).saturating_add(16));
+        let decoder = self
+            .decoder
+            .get_or_insert_with(|| self.charset.encoding().new_decoder());
+        let capacity = self
+            .charset
+            .encoding()
+            .max_utf8_buffer_length(input.len())
+            .unwrap_or(input.len().saturating_mul(4).saturating_add(16));
         let mut output = String::with_capacity(capacity);
-        let (_result, _read, _had_errors) = decoder.decode_to_string(input, &mut output, false);
+        let (_result, _read, _had_errors) =
+            decoder.decode_to_string(input, &mut output, false);
         output
     }
 
     pub fn finish(&mut self) -> String {
-        let Some(decoder) = self.decoder.as_mut() else { return String::new(); };
+        let Some(decoder) = self.decoder.as_mut() else {
+            return String::new();
+        };
         let mut output = String::with_capacity(16);
         let _ = decoder.decode_to_string(&[], &mut output, true);
         self.decoder = None;
@@ -70,10 +82,20 @@ impl TerminalScreen {
         Self::with_charset(rows, cols, scrollback_capacity, TerminalCharset::Utf8)
     }
 
-    pub fn with_charset(rows: u16, cols: u16, scrollback_capacity: usize, charset: TerminalCharset) -> Self {
+    pub fn with_charset(
+        rows: u16,
+        cols: u16,
+        scrollback_capacity: usize,
+        charset: TerminalCharset,
+    ) -> Self {
         let rows = rows.max(1);
         let cols = cols.max(1);
-        Self { parser: Parser::new(rows, cols, scrollback_capacity), decoder: TerminalDecoder::new(charset), rows, cols }
+        Self {
+            parser: Parser::new(rows, cols, scrollback_capacity),
+            decoder: TerminalDecoder::new(charset),
+            rows,
+            cols,
+        }
     }
 
     pub fn set_charset(&mut self, charset: TerminalCharset) {
@@ -170,14 +192,12 @@ mod tests {
 
     #[test]
     fn gbk_multibyte_sequence_survives_packet_boundary() {
-        let encoded = "中文".as_bytes();
         let (bytes, _, _) = GBK.encode("中文");
         let bytes = bytes.into_owned();
         let mut decoder = TerminalDecoder::new(TerminalCharset::Gbk);
         let first = decoder.decode(&bytes[..1]);
         let second = decoder.decode(&bytes[1..]);
         assert_eq!(format!("{first}{second}"), "中文");
-        assert_eq!(encoded, "中文".as_bytes());
     }
 
     #[test]
