@@ -98,7 +98,10 @@ impl ForwardHandle {
         }
         if let Some(remote) = self.remote_cancel.take() {
             remote.routes.lock().await.remove(&remote.route_key);
-            let _ = remote.handle.cancel_tcpip_forward(remote.address, remote.port as u32).await;
+            let _ = remote
+                .handle
+                .cancel_tcpip_forward(remote.address, remote.port as u32)
+                .await;
         }
     }
 }
@@ -330,7 +333,10 @@ mod tests {
 
     #[test]
     fn remote_forward_listen_host_must_be_an_ip_or_localhost() {
-        assert_eq!(remote_listen_ip("localhost").unwrap(), "127.0.0.1".parse().unwrap());
+        assert_eq!(
+            remote_listen_ip("localhost").unwrap(),
+            "127.0.0.1".parse().unwrap()
+        );
         assert_eq!(remote_listen_ip("::1").unwrap(), "::1".parse().unwrap());
         assert!(remote_listen_ip("remote.example").is_err());
     }
@@ -389,12 +395,17 @@ pub(crate) async fn start_remote(
     }
 
     let requested_port = spec.listen_port;
-    let actual_port = match handle.tcpip_forward(address.clone(), requested_port as u32).await {
+    let actual_port = match handle
+        .tcpip_forward(address.clone(), requested_port as u32)
+        .await
+    {
         Ok(_) if requested_port > 0 => requested_port,
         Ok(port) if port > 0 && port <= u16::MAX as u32 => port as u16,
         Ok(_) => {
             routes.lock().await.remove(&route_key);
-            return Err(SshError::Proxy("SSH server returned an invalid remote port".into()));
+            return Err(SshError::Proxy(
+                "SSH server returned an invalid remote port".into(),
+            ));
         }
         Err(error) => {
             routes.lock().await.remove(&route_key);
@@ -407,7 +418,9 @@ pub(crate) async fn start_remote(
         registered.remove(&0);
         if registered.contains_key(&actual_port) {
             drop(registered);
-            let _ = handle.cancel_tcpip_forward(address, actual_port as u32).await;
+            let _ = handle
+                .cancel_tcpip_forward(address, actual_port as u32)
+                .await;
             return Err(SshError::Proxy(format!(
                 "remote forwarding port {actual_port} is already registered"
             )));
