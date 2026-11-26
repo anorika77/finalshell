@@ -1,5 +1,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
+
 use russh::{
     Channel, Disconnect,
     client::{self, Handler},
@@ -54,6 +56,7 @@ pub struct SshOptions {
     pub keyboard_interactive_prompt:
         Option<tokio::sync::mpsc::Sender<KeyboardInteractiveChallenge>>,
     pub keyboard_interactive_timeout: Duration,
+    pub proxy_password: Option<String>,
 }
 
 impl SshOptions {
@@ -68,6 +71,7 @@ impl SshOptions {
             host_key_prompt_timeout: Duration::from_secs(120),
             keyboard_interactive_prompt: None,
             keyboard_interactive_timeout: Duration::from_secs(120),
+            proxy_password: None,
         }
     }
 }
@@ -85,6 +89,7 @@ pub enum SshCredentials {
 #[derive(Debug)]
 pub enum SshError {
     Timeout,
+    Proxy(String),
     UnknownHostKey { host: String, port: u16 },
     ChangedHostKey { host: String, port: u16 },
     AuthenticationRejected,
@@ -106,6 +111,7 @@ impl std::fmt::Display for SshError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Timeout => write!(f, "SSH connection timed out"),
+            Self::Proxy(message) => write!(f, "SSH proxy: {message}"),
             Self::UnknownHostKey { host, port } => {
                 write!(f, "unknown SSH host key for {host}:{port}")
             }
@@ -262,7 +268,34 @@ impl SshClient {
             nodelay: true,
             ..Default::default()
         };
-        let connect = client::connect(Arc::new(config), (host.addr.as_str(), port), verifier);
+        let connect = async {
+            match host.proxy.as_ref().filter(|proxy| !proxy.kind.is_empty()) {
+                None => client::connect(Arc::new(config), (host.addr.as_str(), port), verifier).await,
+                Some(proxy) => {
+                    let stream = match proxy.kind.as_str() {
+                        "socks5" => dial_socks5(
+                            proxy,
+                            options.proxy_password.as_deref(),
+                            &host.addr,
+                            port,
+                            options.connect_timeout,
+                        ).await?,
+                        "http" => dial_http_connect(
+                            proxy,
+                            options.proxy_password.as_deref(),
+                            &host.addr,
+                            port,
+                            options.connect_timeout,
+                        ).await?,
+                        "jump" => return Err(SshError::Proxy(
+                            "Jump Host transport is not implemented yet".into(),
+                        )),
+                        kind => return Err(SshError::Proxy(format!("unsupported proxy type: {kind}"))),
+                    };
+                    client::connect_stream(Arc::new(config), stream, verifier).await
+                }
+            }
+        };
         let mut handle = tokio::time::timeout(options.connect_timeout, connect)
             .await
             .map_err(|_| SshError::Timeout)??;
@@ -370,6 +403,130 @@ impl SshClient {
             .await?;
         Ok(())
     }
+}
+
+
+async fn dial_socks5(
+    proxy: &crate::config::ProxyConfig,
+    password: Option<&str>,
+    target_host: &str,
+    target_port: u16,
+    timeout: Duration,
+) -> Result<TcpStream, SshError> {
+    let port = if proxy.port == 0 { 1080 } else { proxy.port };
+    let addr = format!("{}:{port}", proxy.addr);
+    let mut stream = TcpStream::connect(&addr).await
+        .map_err(|error| SshError::Proxy(format!("cannot connect to {addr}: {error}")))?;
+    let authenticated = !proxy.user.is_empty();
+    stream.write_all(if authenticated { &[5, 2, 0, 2] } else { &[5, 1, 0] }).await
+        .map_err(|error| SshError::Proxy(error.to_string()))?;
+    let mut method = [0u8; 2];
+    stream.read_exact(&mut method).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+    if method[0] != 5 || method[1] == 0xff || (method[1] == 2 && !authenticated) {
+        return Err(SshError::Proxy("SOCKS5 authentication method rejected".into()));
+    }
+    if method[1] == 2 {
+        let user = proxy.user.as_bytes();
+        let pass = password.unwrap_or_default().as_bytes();
+        if user.len() > 255 || pass.len() > 255 {
+            return Err(SshError::Proxy("SOCKS5 credentials exceed 255 bytes".into()));
+        }
+        let mut auth = Vec::with_capacity(user.len() + pass.len() + 3);
+        auth.extend_from_slice(&[1, user.len() as u8]);
+        auth.extend_from_slice(user);
+        auth.push(pass.len() as u8);
+        auth.extend_from_slice(pass);
+        stream.write_all(&auth).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+        let mut result = [0u8; 2];
+        stream.read_exact(&mut result).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+        if result != [1, 0] {
+            return Err(SshError::Proxy("SOCKS5 username/password authentication failed".into()));
+        }
+    } else if method[1] != 0 {
+        return Err(SshError::Proxy(format!("unsupported SOCKS5 auth method {}", method[1])));
+    }
+    let host = target_host.as_bytes();
+    if host.is_empty() || host.len() > 255 {
+        return Err(SshError::Proxy("SOCKS5 target hostname must be 1..255 bytes".into()));
+    }
+    let mut request = Vec::with_capacity(host.len() + 7);
+    request.extend_from_slice(&[5, 1, 0, 3, host.len() as u8]);
+    request.extend_from_slice(host);
+    request.extend_from_slice(&target_port.to_be_bytes());
+    stream.write_all(&request).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+    let mut head = [0u8; 4];
+    stream.read_exact(&mut head).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+    if head[0] != 5 || head[1] != 0 {
+        return Err(SshError::Proxy(format!("SOCKS5 CONNECT failed with reply {}", head[1])));
+    }
+    let address_len = match head[3] {
+        1 => 4,
+        4 => 16,
+        3 => {
+            let mut len = [0u8; 1];
+            stream.read_exact(&mut len).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+            len[0] as usize
+        }
+        kind => return Err(SshError::Proxy(format!("invalid SOCKS5 address type {kind}"))),
+    };
+    let mut discard = vec![0u8; address_len + 2];
+    stream.read_exact(&mut discard).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+    let _ = timeout;
+    Ok(stream)
+}
+
+async fn dial_http_connect(
+    proxy: &crate::config::ProxyConfig,
+    password: Option<&str>,
+    target_host: &str,
+    target_port: u16,
+    _timeout: Duration,
+) -> Result<TcpStream, SshError> {
+    let port = if proxy.port == 0 { 8080 } else { proxy.port };
+    let addr = format!("{}:{port}", proxy.addr);
+    let mut stream = TcpStream::connect(&addr).await
+        .map_err(|error| SshError::Proxy(format!("cannot connect to {addr}: {error}")))?;
+    let target = format!("{target_host}:{target_port}");
+    let mut request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
+    if !proxy.user.is_empty() {
+        let token = base64_encode(format!("{}:{}", proxy.user, password.unwrap_or_default()).as_bytes());
+        request.push_str(&format!("Proxy-Authorization: Basic {token}\r\n"));
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes()).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+    let mut response = Vec::with_capacity(512);
+    let mut byte = [0u8; 1];
+    while response.len() < 16 * 1024 {
+        stream.read_exact(&mut byte).await.map_err(|error| SshError::Proxy(error.to_string()))?;
+        response.push(byte[0]);
+        if response.ends_with(b"\r\n\r\n") { break; }
+    }
+    if !response.ends_with(b"\r\n\r\n") {
+        return Err(SshError::Proxy("HTTP CONNECT response headers too large".into()));
+    }
+    let headers = String::from_utf8_lossy(&response);
+    let status = headers.lines().next().unwrap_or_default();
+    let code = status.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok())
+        .ok_or_else(|| SshError::Proxy("invalid HTTP CONNECT response".into()))?;
+    if !(200..300).contains(&code) {
+        return Err(SshError::Proxy(format!("HTTP CONNECT rejected: {status}")));
+    }
+    Ok(stream)
+}
+
+fn base64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let a = chunk[0];
+        let b = *chunk.get(1).unwrap_or(&0);
+        let c = *chunk.get(2).unwrap_or(&0);
+        output.push(TABLE[(a >> 2) as usize] as char);
+        output.push(TABLE[(((a & 3) << 4) | (b >> 4)) as usize] as char);
+        output.push(if chunk.len() > 1 { TABLE[(((b & 15) << 2) | (c >> 6)) as usize] as char } else { '=' });
+        output.push(if chunk.len() > 2 { TABLE[(c & 63) as usize] as char } else { '=' });
+    }
+    output
 }
 
 async fn authenticate_keyboard_interactive(
