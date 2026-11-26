@@ -19,8 +19,22 @@ pub struct TerminalInputMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalKey {
-    Up, Down, Right, Left, Home, End, Insert, Delete, PageUp, PageDown,
-    F(u8), Enter, Tab, Backspace, Escape, Ctrl(char),
+    Up,
+    Down,
+    Right,
+    Left,
+    Home,
+    End,
+    Insert,
+    Delete,
+    PageUp,
+    PageDown,
+    F(u8),
+    Enter,
+    Tab,
+    Backspace,
+    Escape,
+    Ctrl(char),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,7 +257,14 @@ impl TerminalInputEncoder {
             Some(format!("\x1b[<{code};{x};{y}{suffix}").into_bytes())
         } else if x <= 223 && y <= 223 {
             let button = if event.pressed { code as u8 } else { 3 };
-            Some(vec![0x1b, b'[', b'M', 32 + button, 32 + x as u8, 32 + y as u8])
+            Some(vec![
+                0x1b,
+                b'[',
+                b'M',
+                32 + button,
+                32 + x as u8,
+                32 + y as u8,
+            ])
         } else {
             None
         }

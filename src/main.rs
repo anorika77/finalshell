@@ -4,6 +4,7 @@ pub mod sftp;
 pub mod ssh;
 pub mod terminal;
 pub mod terminal_input;
+pub mod terminal_manager;
 pub mod terminal_screen;
 
 fn main() {

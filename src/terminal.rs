@@ -3,9 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use russh::{Channel, ChannelMsg, client};
 
 use crate::ssh::SshError;
-use crate::terminal_input::{
-    MouseEvent, TerminalInputEncoder, TerminalInputMode, TerminalKey,
-};
+use crate::terminal_input::{MouseEvent, TerminalInputEncoder, TerminalInputMode, TerminalKey};
 
 static NEXT_TERMINAL_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -36,7 +34,9 @@ impl TerminalSession {
     ) -> Result<Self, SshError> {
         let cols = cols.max(1);
         let rows = rows.max(1);
-        channel.request_pty(true, term, cols, rows, 0, 0, &[]).await?;
+        channel
+            .request_pty(true, term, cols, rows, 0, 0, &[])
+            .await?;
         channel.request_shell(true).await?;
         Ok(Self {
             id: NEXT_TERMINAL_ID.fetch_add(1, Ordering::Relaxed),
