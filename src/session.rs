@@ -239,9 +239,11 @@ impl ConnectionManager {
         };
 
         let client = SshClient::connect(&host, credentials, options).await?;
+        let previous_store = self.store.clone();
         self.clients.insert(host_id.into(), client);
         self.store.mark_connected(host_id, utc_timestamp());
         if let Err(error) = self.save() {
+            self.store = previous_store;
             if let Some(client) = self.clients.remove(host_id) {
                 let _ = client.disconnect().await;
             }
