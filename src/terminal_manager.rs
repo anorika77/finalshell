@@ -16,7 +16,7 @@ pub enum SplitAxis {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum PaneNode {
     Terminal(u64),
     Split {
@@ -555,9 +555,9 @@ mod tests {
         let json = layout.to_json().unwrap();
         assert_eq!(PaneLayout::from_json(&json).unwrap(), layout);
 
-        let duplicate = r#"{"root":{"type":"split","axis":"horizontal","ratio":0.5,"first":{"type":"terminal","0":7},"second":{"type":"terminal","0":7}},"focused":7}"#;
+        let duplicate = r#"{"root":{"type":"split","data":{"axis":"horizontal","ratio":0.5,"first":{"type":"terminal","data":7},"second":{"type":"terminal","data":7}}},"focused":7}"#;
         assert!(PaneLayout::from_json(duplicate).is_err());
-        let invalid_ratio = r#"{"root":{"type":"split","axis":"horizontal","ratio":1.5,"first":{"type":"terminal","0":7},"second":{"type":"terminal","0":8}},"focused":7}"#;
+        let invalid_ratio = r#"{"root":{"type":"split","data":{"axis":"horizontal","ratio":1.5,"first":{"type":"terminal","data":7},"second":{"type":"terminal","data":8}}},"focused":7}"#;
         assert!(PaneLayout::from_json(invalid_ratio).is_err());
     }
 
