@@ -133,7 +133,12 @@ impl PaneLayout {
 fn validate_node(node: &PaneNode) -> Result<(), String> {
     match node {
         PaneNode::Terminal(_) => Ok(()),
-        PaneNode::Split { ratio, first, second, .. } => {
+        PaneNode::Split {
+            ratio,
+            first,
+            second,
+            ..
+        } => {
             if !ratio.is_finite() || !(0.1..=0.9).contains(ratio) {
                 return Err("pane split ratio must be finite and between 0.1 and 0.9".into());
             }
@@ -294,7 +299,11 @@ impl TerminalManager {
         self.options.insert(id, (term.to_owned(), cols, rows));
         self.screens.insert(
             id,
-            TerminalScreen::new(rows.min(u16::MAX as u32) as u16, cols.min(u16::MAX as u32) as u16, 10_000),
+            TerminalScreen::new(
+                rows.min(u16::MAX as u32) as u16,
+                cols.min(u16::MAX as u32) as u16,
+                10_000,
+            ),
         );
         self.active = Some(id);
         if self.layout.is_none() {
@@ -394,7 +403,10 @@ impl TerminalManager {
             *saved_rows = rows;
         }
         if let Some(screen) = self.screens.get_mut(&terminal_id) {
-            screen.resize(rows.min(u16::MAX as u32) as u16, cols.min(u16::MAX as u32) as u16);
+            screen.resize(
+                rows.min(u16::MAX as u32) as u16,
+                cols.min(u16::MAX as u32) as u16,
+            );
         }
         Ok(true)
     }
@@ -451,21 +463,33 @@ impl TerminalManager {
 
     pub fn snapshot(&self) -> Option<TerminalManagerSnapshot> {
         let layout = self.layout.clone()?;
-        let panes = layout.terminal_ids().into_iter().map(|old_id| {
-            let (term, cols, rows) = self.options.get(&old_id)
-                .cloned()
-                .unwrap_or_else(|| ("xterm-256color".into(), 80, 24));
-            TerminalPaneSnapshot {
-                old_id,
-                term,
-                cols,
-                rows,
-                charset: self.screens.get(&old_id)
-                    .map(TerminalScreen::charset)
-                    .unwrap_or(TerminalCharset::Utf8),
-            }
-        }).collect();
-        Some(TerminalManagerSnapshot { version: 1, layout, panes })
+        let panes = layout
+            .terminal_ids()
+            .into_iter()
+            .map(|old_id| {
+                let (term, cols, rows) = self
+                    .options
+                    .get(&old_id)
+                    .cloned()
+                    .unwrap_or_else(|| ("xterm-256color".into(), 80, 24));
+                TerminalPaneSnapshot {
+                    old_id,
+                    term,
+                    cols,
+                    rows,
+                    charset: self
+                        .screens
+                        .get(&old_id)
+                        .map(TerminalScreen::charset)
+                        .unwrap_or(TerminalCharset::Utf8),
+                }
+            })
+            .collect();
+        Some(TerminalManagerSnapshot {
+            version: 1,
+            layout,
+            panes,
+        })
     }
 
     /// Reopens all PTYs from a snapshot and restores the split tree with fresh channel IDs.
