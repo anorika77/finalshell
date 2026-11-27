@@ -1,7 +1,9 @@
 use encoding_rs::{BIG5, Encoding, GBK, UTF_8};
+use serde::{Deserialize, Serialize};
 use vt100::Parser;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TerminalCharset {
     Utf8,
     Gbk,
