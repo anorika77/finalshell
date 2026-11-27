@@ -44,7 +44,7 @@ pub fn parse_ssh_config(text: &str, local_user: &str) -> Result<Vec<SshConfigEnt
                 in_match = false;
                 patterns = args.clone();
                 for name in args {
-                    if !name.contains(['*', '?', '!']) && !aliases.iter().any(|a| a.eq_ignore_ascii_case(&name)) {
+                    if !name.chars().any(|ch| matches!(ch, '*' | '?' | '!')) && !aliases.iter().any(|a| a.eq_ignore_ascii_case(&name)) {
                         aliases.push(name);
                     }
                 }
@@ -67,12 +67,6 @@ pub fn parse_ssh_config(text: &str, local_user: &str) -> Result<Vec<SshConfigEnt
         let mut s = Settings::default();
         for (key, value, conds) in &lines {
             if !matches_host(&alias, conds) { continue; }
-            let slot = match key.as_str() {
-                "hostname" => &mut s.hostname,
-                "port" => &mut s.port.map(|v| v.to_string()).map(|_| unreachable!()),
-                _ => continue,
-            };
-            let _ = slot;
             match key.as_str() {
                 "hostname" if s.hostname.is_none() => s.hostname = Some(value.clone()),
                 "port" if s.port.is_none() => {
@@ -84,7 +78,7 @@ pub fn parse_ssh_config(text: &str, local_user: &str) -> Result<Vec<SshConfigEnt
                 _ => {}
             }
         }
-        let addr = s.hostname.unwrap_or_else(|| alias.clone());
+        let addr = s.hostname.map(|v| expand_identity(&v, &alias, &alias, local_user, local_user, s.port.unwrap_or(22))).unwrap_or_else(|| alias.clone());
         let user = s.user.filter(|v| !v.is_empty()).unwrap_or_else(|| local_user.to_owned());
         let mut host = Host {
             name: alias.clone(), addr: addr.clone(), user: user.clone(),
@@ -213,7 +207,7 @@ mod tests {
 
     #[test]
     fn rejects_configs_without_named_hosts_and_bad_quotes() {
-        assert!(parse_ssh_config("Host *\\n User root\\n", "u").is_err());
-        assert!(parse_ssh_config("Host a\\n User \\"oops\\n", "u").is_err());
+        assert!(parse_ssh_config("Host *\n User root\n", "u").is_err());
+        assert!(parse_ssh_config("Host a\n User \\"oops\n", "u").is_err());
     }
 }
