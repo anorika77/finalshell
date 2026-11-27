@@ -500,17 +500,23 @@ impl TerminalManager {
         snapshot: &TerminalManagerSnapshot,
     ) -> Result<BTreeMap<u64, u64>, SshError> {
         if !self.is_empty() {
-            return Err(SshError::Proxy("terminal manager must be empty before restore".into()));
+            return Err(SshError::Proxy(
+                "terminal manager must be empty before restore".into(),
+            ));
         }
         if snapshot.version != 1 || snapshot.layout.validate().is_err() {
-            return Err(SshError::Proxy("invalid or unsupported terminal snapshot".into()));
+            return Err(SshError::Proxy(
+                "invalid or unsupported terminal snapshot".into(),
+            ));
         }
         let mut expected = snapshot.layout.terminal_ids();
         expected.sort_unstable();
         let mut supplied: Vec<_> = snapshot.panes.iter().map(|pane| pane.old_id).collect();
         supplied.sort_unstable();
         if expected != supplied {
-            return Err(SshError::Proxy("snapshot pane list does not match its layout".into()));
+            return Err(SshError::Proxy(
+                "snapshot pane list does not match its layout".into(),
+            ));
         }
 
         let mut remap = BTreeMap::new();
@@ -553,7 +559,12 @@ impl TerminalManager {
 fn remap_node(node: &PaneNode, remap: &BTreeMap<u64, u64>) -> Option<PaneNode> {
     match node {
         PaneNode::Terminal(id) => remap.get(id).copied().map(PaneNode::Terminal),
-        PaneNode::Split { axis, ratio, first, second } => Some(PaneNode::Split {
+        PaneNode::Split {
+            axis,
+            ratio,
+            first,
+            second,
+        } => Some(PaneNode::Split {
             axis: *axis,
             ratio: *ratio,
             first: Box::new(remap_node(first, remap)?),
