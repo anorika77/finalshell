@@ -25,6 +25,10 @@ pub enum TerminalEvent {
     Closed,
 }
 
+fn normalize_dimensions(cols: u32, rows: u32) -> (u32, u32) {
+    (cols.max(1), rows.max(1))
+}
+
 impl TerminalSession {
     pub(crate) async fn open(
         channel: Channel<client::Msg>,
@@ -32,8 +36,7 @@ impl TerminalSession {
         cols: u32,
         rows: u32,
     ) -> Result<Self, SshError> {
-        let cols = cols.max(1);
-        let rows = rows.max(1);
+        let (cols, rows) = normalize_dimensions(cols, rows);
         channel
             .request_pty(true, term, cols, rows, 0, 0, &[])
             .await?;
@@ -162,7 +165,8 @@ mod tests {
 
     #[test]
     fn terminal_dimensions_are_never_zero() {
-        assert_eq!((0_u32.max(1), 0_u32.max(1)), (1, 1));
+        assert_eq!(normalize_dimensions(0, 0), (1, 1));
+        assert_eq!(normalize_dimensions(120, 40), (120, 40));
     }
 
     #[test]

@@ -342,10 +342,10 @@ impl TerminalManager {
         if !self.sessions.contains_key(&terminal_id) {
             return false;
         }
-        if let Some(layout) = &mut self.layout {
-            if !layout.focus(terminal_id) {
-                return false;
-            }
+        if let Some(layout) = &mut self.layout
+            && !layout.focus(terminal_id)
+        {
+            return false;
         }
         self.active = Some(terminal_id);
         true
