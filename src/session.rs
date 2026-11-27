@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{
+    importer::parse_ssh_config,
     config::{
         AUTH_AGENT, AUTH_KEY, AUTH_KEYBOARD_INTERACTIVE, AUTH_PASSWORD, ConfigError, Host, Store,
     },
@@ -96,6 +97,56 @@ impl ConnectionManager {
 
     pub fn client(&self, host_id: &str) -> Option<&SshClient> {
         self.clients.get(host_id)
+    }
+
+
+    /// Import OpenSSH client profiles. Existing targets are left untouched;
+    /// passwords are never read from or written to the SSH config.
+    pub fn import_ssh_config(&mut self, text: &str, local_user: &str) -> Result<Vec<String>, ConnectionError> {
+        let entries = parse_ssh_config(text, local_user)
+            .map_err(|e| ConnectionError::Config(e.to_string()))?;
+        let previous = self.store.clone();
+        let mut imported = Vec::new();
+        let mut aliases = BTreeMap::<String, String>::new();
+        let mut pending = Vec::<(String, String)>::new();
+
+        for entry in entries {
+            let host = entry.host;
+            let existing = self.store.hosts.iter().find(|h| {
+                !h.deleted() && h.addr.eq_ignore_ascii_case(&host.addr)
+                    && h.port_or_22() == host.port_or_22() && h.user == host.user
+            }).map(|h| h.id.clone());
+            let id = if let Some(id) = existing {
+                id
+            } else {
+                self.store.add(host.clone());
+                let id = self.store.hosts.last().expect("host just added").id.clone();
+                imported.push(id.clone());
+                id
+            };
+            aliases.insert(host.name.to_ascii_lowercase(), id.clone());
+            if let Some(jump) = entry.proxy_jump {
+                pending.push((id, jump));
+            }
+        }
+        for (id, alias) in pending {
+            let jump_id = aliases.get(&alias.to_ascii_lowercase()).cloned().or_else(|| {
+                self.store.hosts.iter().find(|h| h.name.eq_ignore_ascii_case(&alias))
+                    .map(|h| h.id.clone())
+            });
+            if let Some(jump_id) = jump_id.filter(|jump_id| jump_id != &id) {
+                if let Some(host) = self.store.host_mut(&id) {
+                    host.proxy = Some(crate::config::ProxyConfig {
+                        kind: "jump".into(), jump_host: jump_id, ..Default::default()
+                    });
+                }
+            }
+        }
+        if let Err(error) = self.save() {
+            self.store = previous;
+            return Err(error.into());
+        }
+        Ok(imported)
     }
 
     pub fn save(&self) -> Result<(), ConfigError> {

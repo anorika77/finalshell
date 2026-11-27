@@ -1,5 +1,6 @@
 pub mod config;
 pub mod forward;
+pub mod importer;
 pub mod session;
 pub mod sftp;
 pub mod ssh;
