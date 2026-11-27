@@ -30,7 +30,10 @@ impl std::fmt::Display for ConnectionError {
             Self::HostDeleted(id) => write!(f, "SSH host profile is deleted: {id}"),
             Self::AlreadyConnected(id) => write!(f, "SSH host is already connected: {id}"),
             Self::HostStillConnected(id) => {
-                write!(f, "disconnect SSH host before permanently removing it: {id}")
+                write!(
+                    f,
+                    "disconnect SSH host before permanently removing it: {id}"
+                )
             }
             Self::MissingCredential(kind) => {
                 write!(f, "credential is required for SSH authentication: {kind}")
@@ -115,11 +118,7 @@ impl ConnectionManager {
         Ok(id)
     }
 
-    pub fn update_host(
-        &mut self,
-        host_id: &str,
-        mut updated: Host,
-    ) -> Result<(), ConnectionError> {
+    pub fn update_host(&mut self, host_id: &str, mut updated: Host) -> Result<(), ConnectionError> {
         let Some(existing) = self.store.host(host_id) else {
             return Err(ConnectionError::HostNotFound(host_id.into()));
         };
