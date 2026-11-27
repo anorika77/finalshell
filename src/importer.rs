@@ -212,6 +212,6 @@ mod tests {
     #[test]
     fn rejects_configs_without_named_hosts_and_bad_quotes() {
         assert!(parse_ssh_config("Host *\n User root\n", "u").is_err());
-        assert!(parse_ssh_config("Host a\n User \\"oops\n", "u").is_err());
+        assert!(parse_ssh_config("Host a\n User \"oops\n", "u").is_err());
     }
 }
