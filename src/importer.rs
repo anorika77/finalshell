@@ -192,8 +192,12 @@ mod tests {
               HostName old.internal
         "#;
         let entries = parse_ssh_config(input, "local").unwrap();
-        assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0].host.name, "prod-*"); // wildcard-only names are excluded below
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].host.name, "prod-db");
+        assert_eq!(entries[0].host.addr, "prod-db.internal");
+        assert_eq!(entries[0].host.port, 2200);
+        assert_eq!(entries[0].host.user, "global");
+        assert_eq!(entries[0].proxy_jump.as_deref(), Some("bastion"));
     }
 
     #[test]
