@@ -837,7 +837,7 @@ fn parse_securecrt_session(text: &str, name: &str, folders: Vec<String>, config_
             path = config_dir.join(path[var.len()..].trim_start_matches(['/', '\\'])).to_string_lossy().into_owned();
         }
         let foreign_windows = path.len() >= 3 && path.as_bytes()[1] == b':' && matches!(path.as_bytes()[2], b'\\' | b'/') && !cfg!(windows);
-        if path.contains("\${") || foreign_windows || (path.starts_with(r"\\") && !cfg!(windows)) {
+        if path.contains(r"${") || foreign_windows || (path.starts_with(r"\\") && !cfg!(windows)) {
             needs_key = true; path.clear();
         }
         host.auth = AUTH_KEY.into(); host.key_path = path;
