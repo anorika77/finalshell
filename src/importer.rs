@@ -1,4 +1,8 @@
-use std::{collections::{BTreeMap, BTreeSet}, fs, path::{Path, PathBuf}};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
+};
 
 use crate::config::{AUTH_KEY, AUTH_PASSWORD, Host};
 
@@ -775,9 +779,14 @@ pub fn read_mobaxterm(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
     Ok(out)
 }
 
-
 /// Parse one SecureCRT session file. Secret/password fields are ignored.
-fn parse_securecrt_session(text: &str, name: &str, folders: Vec<String>, config_dir: &Path, global_key: &str) -> Option<FinalShellEntry> {
+fn parse_securecrt_session(
+    text: &str,
+    name: &str,
+    folders: Vec<String>,
+    config_dir: &Path,
+    global_key: &str,
+) -> Option<FinalShellEntry> {
     let mut strings = BTreeMap::<String, String>::new();
     let mut numbers = BTreeMap::<String, u32>::new();
     let mut descriptions = Vec::<String>::new();
@@ -785,39 +794,92 @@ fn parse_securecrt_session(text: &str, name: &str, folders: Vec<String>, config_
     for raw in text.trim_start_matches('\u{feff}').lines() {
         let line = raw.trim_end_matches('\r');
         if line.starts_with(' ') || line.starts_with('\t') {
-            if list_left > 0 { descriptions.push(line[1..].to_owned()); list_left -= 1; }
+            if list_left > 0 {
+                descriptions.push(line[1..].to_owned());
+                list_left -= 1;
+            }
             continue;
         }
         list_left = 0;
         let b = line.as_bytes();
-        if b.len() < 4 || b[1] != b':' || b[2] != b'"' { continue; }
-        let Some((key, value)) = line[3..].split_once("\"=") else { continue; };
+        if b.len() < 4 || b[1] != b':' || b[2] != b'"' {
+            continue;
+        }
+        let Some((key, value)) = line[3..].split_once("\"=") else {
+            continue;
+        };
         let value = value.trim();
         match b[0] {
-            b'S' if matches!(key, "Protocol Name" | "Hostname" | "Username" | "Identity Filename V2" | "Identity Filename" | "SSH2 Authentications V2") => { strings.insert(key.to_owned(), value.to_owned()); }
-            b'D' if matches!(key, "[SSH2] Port" | "[SSH1] Port" | "Use Global Public Key") => {
-                if let Ok(v) = u32::from_str_radix(value, 16) { numbers.insert(key.to_owned(), v); }
+            b'S' if matches!(
+                key,
+                "Protocol Name"
+                    | "Hostname"
+                    | "Username"
+                    | "Identity Filename V2"
+                    | "Identity Filename"
+                    | "SSH2 Authentications V2"
+            ) =>
+            {
+                strings.insert(key.to_owned(), value.to_owned());
             }
-            b'Z' if key == "Description" => { list_left = usize::from_str_radix(value, 16).unwrap_or(1000).min(1000); }
+            b'D' if matches!(key, "[SSH2] Port" | "[SSH1] Port" | "Use Global Public Key") => {
+                if let Ok(v) = u32::from_str_radix(value, 16) {
+                    numbers.insert(key.to_owned(), v);
+                }
+            }
+            b'Z' if key == "Description" => {
+                list_left = usize::from_str_radix(value, 16).unwrap_or(1000).min(1000);
+            }
             _ => {}
         }
     }
-    let protocol = strings.get("Protocol Name").map(String::as_str).unwrap_or("").to_ascii_uppercase();
-    if !protocol.is_empty() && protocol != "SSH1" && protocol != "SSH2" { return None; }
+    let protocol = strings
+        .get("Protocol Name")
+        .map(String::as_str)
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    if !protocol.is_empty() && protocol != "SSH1" && protocol != "SSH2" {
+        return None;
+    }
     let addr = strings.get("Hostname")?.trim();
-    if addr.is_empty() { return None; }
+    if addr.is_empty() {
+        return None;
+    }
     let mut host = Host {
-        name: name.to_owned(), addr: addr.to_owned(),
+        name: name.to_owned(),
+        addr: addr.to_owned(),
         user: strings.get("Username").cloned().unwrap_or_default(),
-        auth: AUTH_PASSWORD.into(), notes: descriptions.join("\n").trim().to_owned(),
+        auth: AUTH_PASSWORD.into(),
+        notes: descriptions.join("\n").trim().to_owned(),
         ..Host::default()
     };
-    let port_key = if protocol == "SSH1" { "[SSH1] Port" } else { "[SSH2] Port" };
-    if let Some(port) = numbers.get(port_key).copied().filter(|p| *p > 0 && *p <= 65535 && *p != 22) { host.port = port as u16; }
-    let own_key = strings.get("Identity Filename V2").or_else(|| strings.get("Identity Filename")).map(String::as_str).unwrap_or("");
+    let port_key = if protocol == "SSH1" {
+        "[SSH1] Port"
+    } else {
+        "[SSH2] Port"
+    };
+    if let Some(port) = numbers
+        .get(port_key)
+        .copied()
+        .filter(|p| *p > 0 && *p <= 65535 && *p != 22)
+    {
+        host.port = port as u16;
+    }
+    let own_key = strings
+        .get("Identity Filename V2")
+        .or_else(|| strings.get("Identity Filename"))
+        .map(String::as_str)
+        .unwrap_or("");
     let use_global = numbers.get("Use Global Public Key").copied().unwrap_or(0) != 0;
-    let key = if use_global || own_key.is_empty() { global_key } else { own_key };
-    let methods = strings.get("SSH2 Authentications V2").map(String::as_str).unwrap_or("");
+    let key = if use_global || own_key.is_empty() {
+        global_key
+    } else {
+        own_key
+    };
+    let methods = strings
+        .get("SSH2 Authentications V2")
+        .map(String::as_str)
+        .unwrap_or("");
     let mut key_first = None;
     let mut password_first = None;
     for (i, m) in methods.split(',').enumerate() {
@@ -831,70 +893,162 @@ fn parse_securecrt_session(text: &str, name: &str, folders: Vec<String>, config_
     let mut needs_key = false;
     if !key.is_empty() && (use_global || own_key.is_empty() || prefers_key) {
         let mut path = key.split("::").next().unwrap_or("").trim().to_owned();
-        if path.to_ascii_lowercase().ends_with(".pub") { path.truncate(path.len() - 4); }
+        if path.to_ascii_lowercase().ends_with(".pub") {
+            path.truncate(path.len() - 4);
+        }
         let var = "$".to_owned() + "{VDS_CONFIG_PATH}";
-        if path.to_ascii_lowercase().starts_with(&var.to_ascii_lowercase()) {
-            path = config_dir.join(path[var.len()..].trim_start_matches(['/', '\\'])).to_string_lossy().into_owned();
+        if path
+            .to_ascii_lowercase()
+            .starts_with(&var.to_ascii_lowercase())
+        {
+            path = config_dir
+                .join(path[var.len()..].trim_start_matches(['/', '\\']))
+                .to_string_lossy()
+                .into_owned();
         }
-        let foreign_windows = path.len() >= 3 && path.as_bytes()[1] == b':' && matches!(path.as_bytes()[2], b'\\' | b'/') && !cfg!(windows);
+        let foreign_windows = path.len() >= 3
+            && path.as_bytes()[1] == b':'
+            && matches!(path.as_bytes()[2], b'\\' | b'/')
+            && !cfg!(windows);
         if path.contains(r"${") || foreign_windows || (path.starts_with(r"\\") && !cfg!(windows)) {
-            needs_key = true; path.clear();
+            needs_key = true;
+            path.clear();
         }
-        host.auth = AUTH_KEY.into(); host.key_path = path;
+        host.auth = AUTH_KEY.into();
+        host.key_path = path;
     } else if (use_global || own_key.is_empty()) && prefers_key {
-        host.auth = AUTH_KEY.into(); needs_key = true;
+        host.auth = AUTH_KEY.into();
+        needs_key = true;
     }
-    Some(FinalShellEntry { host, folders, needs_key })
+    Some(FinalShellEntry {
+        host,
+        folders,
+        needs_key,
+    })
 }
 
 /// Read SecureCRT's Config directory, Sessions directory, or a selected session folder.
 pub fn read_securecrt(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, ImportError> {
     let chosen = path.as_ref();
-    let sessions = if chosen.join("Sessions").is_dir() { chosen.join("Sessions") } else { chosen.to_path_buf() };
+    let sessions = if chosen.join("Sessions").is_dir() {
+        chosen.join("Sessions")
+    } else {
+        chosen.to_path_buf()
+    };
     let mut ancestor = sessions.as_path();
     let mut config_dir = PathBuf::new();
     while let Some(parent) = ancestor.parent() {
-        if ancestor.file_name().is_some_and(|n| n.eq_ignore_ascii_case("Sessions")) { config_dir = parent.to_path_buf(); break; }
+        if ancestor
+            .file_name()
+            .is_some_and(|n| n.eq_ignore_ascii_case("Sessions"))
+        {
+            config_dir = parent.to_path_buf();
+            break;
+        }
         ancestor = parent;
     }
-    let global_key = fs::read_to_string(config_dir.join("SSH2.ini")).ok().map(|s| {
-        let mut found = String::new();
-        for line in s.lines() {
-            if line.starts_with("S:\"Identity Filename V2\"=") || line.starts_with("S:\"Identity Filename\"=") {
-                found = line.split_once("\"=").map(|(_,v)| v.trim().to_owned()).unwrap_or_default();
-                if !found.is_empty() { break; }
+    let global_key = fs::read_to_string(config_dir.join("SSH2.ini"))
+        .ok()
+        .map(|s| {
+            let mut found = String::new();
+            for line in s.lines() {
+                if line.starts_with("S:\"Identity Filename V2\"=")
+                    || line.starts_with("S:\"Identity Filename\"=")
+                {
+                    found = line
+                        .split_once("\"=")
+                        .map(|(_, v)| v.trim().to_owned())
+                        .unwrap_or_default();
+                    if !found.is_empty() {
+                        break;
+                    }
+                }
             }
+            found
+        })
+        .unwrap_or_default();
+    fn walk(
+        dir: &Path,
+        root: &Path,
+        config: &Path,
+        global: &str,
+        depth: usize,
+        root_level: bool,
+        out: &mut Vec<FinalShellEntry>,
+        count: &mut usize,
+    ) -> Result<(), ImportError> {
+        if depth > 16 {
+            return Ok(());
         }
-        found
-    }).unwrap_or_default();
-    fn walk(dir: &Path, root: &Path, config: &Path, global: &str, depth: usize, root_level: bool, out: &mut Vec<FinalShellEntry>, count: &mut usize) -> Result<(), ImportError> {
-        if depth > 16 { return Ok(()); }
-        let mut items = fs::read_dir(dir).map_err(|e| ImportError(format!("{}: {e}", dir.display())))?
-            .filter_map(Result::ok).collect::<Vec<_>>();
+        let mut items = fs::read_dir(dir)
+            .map_err(|e| ImportError(format!("{}: {e}", dir.display())))?
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
         items.sort_by_key(|e| e.file_name());
         for item in items {
             let p = item.path();
             let name = item.file_name().to_string_lossy().into_owned();
             if item.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                walk(&p, root, config, global, depth + 1, false, out, count)?; continue;
+                walk(&p, root, config, global, depth + 1, false, out, count)?;
+                continue;
             }
             if !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("ini"))
                 || name.eq_ignore_ascii_case("__FolderData__.ini")
-                || (root_level && name.eq_ignore_ascii_case("Default.ini")) { continue; }
+                || (root_level && name.eq_ignore_ascii_case("Default.ini"))
+            {
+                continue;
+            }
             *count += 1;
-            if *count > 10_000 { return Err(ImportError("SecureCRT session limit exceeded (10000)".into())); }
-            let meta = fs::metadata(&p).map_err(|e| ImportError(format!("{}: {e}", p.display())))?;
-            if meta.len() > 1024 * 1024 { continue; }
-            let text = fs::read_to_string(&p).map_err(|e| ImportError(format!("{}: {e}", p.display())))?;
+            if *count > 10_000 {
+                return Err(ImportError(
+                    "SecureCRT session limit exceeded (10000)".into(),
+                ));
+            }
+            let meta =
+                fs::metadata(&p).map_err(|e| ImportError(format!("{}: {e}", p.display())))?;
+            if meta.len() > 1024 * 1024 {
+                continue;
+            }
+            let text =
+                fs::read_to_string(&p).map_err(|e| ImportError(format!("{}: {e}", p.display())))?;
             let rel = p.strip_prefix(root).unwrap_or(&p);
-            let folders = rel.parent().map(|v| v.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect()).unwrap_or_default();
-            if let Some(entry) = parse_securecrt_session(&text, p.file_stem().unwrap_or_default().to_string_lossy().as_ref(), folders, config, global) { out.push(entry); }
+            let folders = rel
+                .parent()
+                .map(|v| {
+                    v.components()
+                        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let Some(entry) = parse_securecrt_session(
+                &text,
+                p.file_stem().unwrap_or_default().to_string_lossy().as_ref(),
+                folders,
+                config,
+                global,
+            ) {
+                out.push(entry);
+            }
         }
         Ok(())
     }
-    let mut out = Vec::new(); let mut count = 0;
-    walk(&sessions, &sessions, &config_dir, &global_key, 0, true, &mut out, &mut count)?;
-    if out.is_empty() { return Err(ImportError(format!("{}: no SecureCRT SSH sessions found", sessions.display()))); }
+    let mut out = Vec::new();
+    let mut count = 0;
+    walk(
+        &sessions,
+        &sessions,
+        &config_dir,
+        &global_key,
+        0,
+        true,
+        &mut out,
+        &mut count,
+    )?;
+    if out.is_empty() {
+        return Err(ImportError(format!(
+            "{}: no SecureCRT SSH sessions found",
+            sessions.display()
+        )));
+    }
     Ok(out)
 }
-
