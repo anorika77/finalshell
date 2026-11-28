@@ -651,7 +651,6 @@ pub fn read_xshell(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Impor
     Ok(out)
 }
 
-
 /// Read MobaXterm INI or exported session files; encrypted passwords are skipped.
 pub fn read_mobaxterm(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, ImportError> {
     let path = path.as_ref();
