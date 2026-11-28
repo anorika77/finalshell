@@ -1204,16 +1204,29 @@ mod mobaxterm_tests {
         let _ = fs::remove_file(&path);
         assert!(entries.windows(2).all(|pair| {
             let left = (
-                pair[0].folders.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>(),
+                pair[0]
+                    .folders
+                    .iter()
+                    .map(|s| s.to_lowercase())
+                    .collect::<Vec<_>>(),
                 pair[0].host.name.to_lowercase(),
             );
             let right = (
-                pair[1].folders.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>(),
+                pair[1]
+                    .folders
+                    .iter()
+                    .map(|s| s.to_lowercase())
+                    .collect::<Vec<_>>(),
                 pair[1].host.name.to_lowercase(),
             );
             left <= right
         }));
-        let by_name = |name: &str| entries.iter().find(|entry| entry.host.name == name).unwrap();
+        let by_name = |name: &str| {
+            entries
+                .iter()
+                .find(|entry| entry.host.name == name)
+                .unwrap()
+        };
         assert_eq!(by_name("alpha").host.user, "");
         assert!(by_name("alpha").host.notes.contains("note#1;ok"));
         assert_eq!(by_name("zeta").host.auth, AUTH_KEY);
