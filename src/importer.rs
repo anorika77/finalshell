@@ -1229,7 +1229,12 @@ mod mobaxterm_tests {
         };
         assert_eq!(by_name("alpha").host.user, "");
         assert_eq!(by_name("zeta").host.auth, AUTH_KEY);
-        assert!(by_name("zeta").needs_key && by_name("zeta").host.key_path.is_empty());
+        if cfg!(windows) {
+            assert!(!by_name("zeta").needs_key);
+            assert!(by_name("zeta").host.key_path.ends_with("id_ed25519"));
+        } else {
+            assert!(by_name("zeta").needs_key && by_name("zeta").host.key_path.is_empty());
+        }
         assert!(
             by_name("app")
                 .host
