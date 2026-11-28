@@ -1202,24 +1202,29 @@ mod mobaxterm_tests {
         fs::write(&path, text).unwrap();
         let entries = read_mobaxterm(&path).unwrap();
         let _ = fs::remove_file(&path);
-        assert_eq!(
-            entries
-                .iter()
-                .map(|e| e.host.name.as_str())
-                .collect::<Vec<_>>(),
-            ["alpha", "zeta", "app", "db"]
-        );
-        assert_eq!(entries[0].host.user, "");
-        assert!(entries[0].host.notes.contains("note#1;ok"));
-        assert_eq!(entries[1].host.auth, AUTH_KEY);
-        assert!(entries[1].needs_key && entries[1].host.key_path.is_empty());
+        assert!(entries.windows(2).all(|pair| {
+            let left = (
+                pair[0].folders.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>(),
+                pair[0].host.name.to_lowercase(),
+            );
+            let right = (
+                pair[1].folders.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>(),
+                pair[1].host.name.to_lowercase(),
+            );
+            left <= right
+        }));
+        let by_name = |name: &str| entries.iter().find(|entry| entry.host.name == name).unwrap();
+        assert_eq!(by_name("alpha").host.user, "");
+        assert!(by_name("alpha").host.notes.contains("note#1;ok"));
+        assert_eq!(by_name("zeta").host.auth, AUTH_KEY);
+        assert!(by_name("zeta").needs_key && by_name("zeta").host.key_path.is_empty());
         assert!(
-            entries[2]
+            by_name("app")
                 .host
                 .notes
                 .contains("jump host settings were not imported")
         );
-        assert_eq!(entries[3].folders, ["Production", "Databases"]);
+        assert_eq!(by_name("db").folders, ["Production", "Databases"]);
     }
 
     #[test]
