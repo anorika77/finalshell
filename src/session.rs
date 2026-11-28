@@ -171,7 +171,10 @@ impl ConnectionManager {
 
 
     /// Import FinalShell's native connection directory without importing encrypted secrets.
-    pub fn import_finalshell_dir(&mut self, path: impl AsRef<Path>) -> Result<Vec<String>, ConnectionError> {
+    pub fn import_finalshell_dir(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<Vec<String>, ConnectionError> {
         let entries = crate::importer::read_finalshell_dir(path)
             .map_err(|error| ConnectionError::Config(error.to_string()))?;
         let previous = self.store.clone();

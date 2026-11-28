@@ -342,8 +342,17 @@ pub struct FinalShellEntry {
 pub fn read_finalshell_dir(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, ImportError> {
     use serde_json::Value;
     let root = path.as_ref();
-    let conn = if root.join("conn").is_dir() { root.join("conn") } else { root.to_path_buf() };
-    if !conn.is_dir() { return Err(ImportError(format!("{} is not a directory", conn.display()))); }
+    let conn = if root.join("conn").is_dir() {
+        root.join("conn")
+    } else {
+        root.to_path_buf()
+    };
+    if !conn.is_dir() {
+        return Err(ImportError(format!(
+            "{} is not a directory",
+            conn.display()
+        )));
+    }
     fn text(v: Option<&Value>) -> String {
         match v {
             Some(Value::String(s)) => s.trim().to_owned(),
@@ -354,58 +363,110 @@ pub fn read_finalshell_dir(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry
     fn number(v: Option<&Value>) -> i64 {
         text(v).parse().unwrap_or(0)
     }
-    fn walk(dir: &Path, root: &Path, folders: &[String], out: &mut Vec<FinalShellEntry>, count: &mut usize) -> Result<(), ImportError> {
+    fn walk(
+        dir: &Path,
+        root: &Path,
+        folders: &[String],
+        out: &mut Vec<FinalShellEntry>,
+        count: &mut usize,
+    ) -> Result<(), ImportError> {
         let mut names = folders.to_vec();
         let folder_file = dir.join("folder.json");
         if let Ok(bytes) = fs::read(&folder_file) {
             if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                if number(v.get("delete_time")) != 0 { return Ok(()); }
+                if number(v.get("delete_time")) != 0 {
+                    return Ok(());
+                }
                 let name = text(v.get("name"));
-                if !name.is_empty() { names.push(name); }
+                if !name.is_empty() {
+                    names.push(name);
+                }
             }
         } else if dir != root {
-            if let Some(name) = dir.file_name().and_then(|n| n.to_str()) { names.push(name.to_owned()); }
+            if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
+                names.push(name.to_owned());
+            }
         }
-        let entries = fs::read_dir(dir).map_err(|e| ImportError(format!("{}: {e}",dir.display())))?;
+        let entries =
+            fs::read_dir(dir).map_err(|e| ImportError(format!("{}: {e}", dir.display())))?;
         for item in entries {
             let item = item.map_err(|e| ImportError(e.to_string()))?;
             let p = item.path();
             if p.is_dir() {
-                if names.len() < 16 { walk(&p, root, &names, out, count)?; }
+                if names.len() < 16 {
+                    walk(&p, root, &names, out, count)?;
+                }
                 continue;
             }
-            if !p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.to_ascii_lowercase().ends_with("_connect_config.json")) { continue; }
+            if !p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.to_ascii_lowercase().ends_with("_connect_config.json"))
+            {
+                continue;
+            }
             *count += 1;
-            if *count > 10000 { return Err(ImportError("FinalShell import exceeds 10000 files".into())); }
-            let data = fs::read(&p).map_err(|e| ImportError(format!("{}: {e}",p.display())))?;
-            if data.len() > 1 << 20 { continue; }
-            let value: Value = match serde_json::from_slice(&data) { Ok(v) => v, Err(_) => continue };
+            if *count > 10000 {
+                return Err(ImportError("FinalShell import exceeds 10000 files".into()));
+            }
+            let data = fs::read(&p).map_err(|e| ImportError(format!("{}: {e}", p.display())))?;
+            if data.len() > 1 << 20 {
+                continue;
+            }
+            let value: Value = match serde_json::from_slice(&data) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
             let rows: Vec<Value> = value.as_array().cloned().unwrap_or_else(|| vec![value]);
             for row in rows {
-                if number(row.get("delete_time")) != 0 { continue; }
+                if number(row.get("delete_time")) != 0 {
+                    continue;
+                }
                 let typ = number(row.get("conection_type"));
-                if typ != 0 && typ != 100 { continue; }
+                if typ != 0 && typ != 100 {
+                    continue;
+                }
                 let addr = text(row.get("host"));
-                if addr.is_empty() { continue; }
+                if addr.is_empty() {
+                    continue;
+                }
                 let auth_type = number(row.get("authentication_type"));
-                let needs_key = auth_type == 2 || (auth_type != 1 && !text(row.get("secret_key_id")).is_empty());
+                let needs_key = auth_type == 2
+                    || (auth_type != 1 && !text(row.get("secret_key_id")).is_empty());
                 let port = number(row.get("port"));
                 let host = Host {
                     name: text(row.get("name")),
                     addr,
-                    port: if (1..=65535).contains(&port) && port != 22 { port as u16 } else { 0 },
+                    port: if (1..=65535).contains(&port) && port != 22 {
+                        port as u16
+                    } else {
+                        0
+                    },
                     user: text(row.get("user_name")),
-                    auth: if needs_key { AUTH_KEY.into() } else { AUTH_PASSWORD.into() },
+                    auth: if needs_key {
+                        AUTH_KEY.into()
+                    } else {
+                        AUTH_PASSWORD.into()
+                    },
                     notes: text(row.get("description")),
                     ..Host::default()
                 };
-                out.push(FinalShellEntry { host, folders: names.clone(), needs_key });
+                out.push(FinalShellEntry {
+                    host,
+                    folders: names.clone(),
+                    needs_key,
+                });
             }
         }
         Ok(())
     }
-    let mut out=Vec::new(); let mut count=0;
-    walk(&conn,&conn,&[],&mut out,&mut count)?;
-    if out.is_empty() { return Err(ImportError("no SSH connections found in FinalShell data".into())); }
+    let mut out = Vec::new();
+    let mut count = 0;
+    walk(&conn, &conn, &[], &mut out, &mut count)?;
+    if out.is_empty() {
+        return Err(ImportError(
+            "no SSH connections found in FinalShell data".into(),
+        ));
+    }
     Ok(out)
 }
