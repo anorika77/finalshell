@@ -99,7 +99,6 @@ impl ConnectionManager {
         self.clients.get(host_id)
     }
 
-
     /// Import OpenSSH client profiles. Existing targets are left untouched;
     /// passwords are never read from or written to the SSH config.
     pub fn import_ssh_config(

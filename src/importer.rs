@@ -1,8 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    fs,
-    path::Path,
-};
+use std::{collections::BTreeSet, fs, path::Path};
 
 use crate::config::{Host, AUTH_KEY, AUTH_PASSWORD};
 
@@ -27,17 +23,14 @@ pub fn read_ssh_config(
     local_user: &str,
 ) -> Result<Vec<SshConfigEntry>, ImportError> {
     let path = path.as_ref();
-    let text = fs::read_to_string(path)
-        .map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
+    let text =
+        fs::read_to_string(path).map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
     parse_ssh_config(&text, local_user)
 }
 
 /// Parse useful connection settings from OpenSSH client configuration.
 /// Include and Match blocks are not expanded; no secret is imported.
-pub fn parse_ssh_config(
-    text: &str,
-    local_user: &str,
-) -> Result<Vec<SshConfigEntry>, ImportError> {
+pub fn parse_ssh_config(text: &str, local_user: &str) -> Result<Vec<SshConfigEntry>, ImportError> {
     #[derive(Default, Clone)]
     struct Settings {
         hostname: Option<String>,
@@ -53,8 +46,8 @@ pub fn parse_ssh_config(
     let mut in_match = false;
 
     for (index, raw) in text.lines().enumerate() {
-        let (key, args) = fields(raw)
-            .map_err(|e| ImportError(format!("line {}: {e}", index + 1)))?;
+        let (key, args) =
+            fields(raw).map_err(|e| ImportError(format!("line {}: {e}", index + 1)))?;
         if key.is_empty() {
             continue;
         }
@@ -178,10 +171,7 @@ fn expand_identity(
     if path == "~" {
         path = home;
     } else if let Some(rest) = path.strip_prefix("~/") {
-        path = Path::new(&home)
-            .join(rest)
-            .to_string_lossy()
-            .into_owned();
+        path = Path::new(&home).join(rest).to_string_lossy().into_owned();
     }
     path.replace("%%", "%")
 }
