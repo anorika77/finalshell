@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
-use crate::config::{Host, AUTH_KEY, AUTH_PASSWORD};
+use crate::config::{AUTH_KEY, AUTH_PASSWORD, Host};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SshConfigEntry {
