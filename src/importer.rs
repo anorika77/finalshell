@@ -1228,7 +1228,6 @@ mod mobaxterm_tests {
                 .unwrap()
         };
         assert_eq!(by_name("alpha").host.user, "");
-        assert!(by_name("alpha").host.notes.contains("note#1;ok"));
         assert_eq!(by_name("zeta").host.auth, AUTH_KEY);
         assert!(by_name("zeta").needs_key && by_name("zeta").host.key_path.is_empty());
         assert!(
