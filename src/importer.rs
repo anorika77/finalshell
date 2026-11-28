@@ -972,6 +972,7 @@ pub fn read_securecrt(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
             found
         })
         .unwrap_or_default();
+    #[allow(clippy::too_many_arguments)]
     fn walk(
         dir: &Path,
         root: &Path,
