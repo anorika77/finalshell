@@ -120,15 +120,13 @@ fn decode_text(data: &[u8]) -> String {
     }
     if data.starts_with(&[0xff, 0xfe]) {
         let u = data[2..]
-            .chunks_exact(2)
-            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b))
             .collect::<Vec<_>>();
         return String::from_utf16_lossy(&u);
     }
     if data.starts_with(&[0xfe, 0xff]) {
         let u = data[2..]
-            .chunks_exact(2)
-            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+            .as_chunks::<2>().0.iter().map(|b| u16::from_be_bytes(*b))
             .collect::<Vec<_>>();
         return String::from_utf16_lossy(&u);
     }
@@ -154,7 +152,9 @@ fn records(text: &str, delimiter: u8) -> Result<Vec<(usize, Vec<String>)>, Strin
     }
     Ok(out)
 }
-fn detect_delimiter(text: &str) -> Result<(u8, Vec<(usize, Vec<String>)>), String> {
+type TableRows = Vec<(usize, Vec<String>)>;
+
+fn detect_delimiter(text: &str) -> Result<(u8, TableRows), String> {
     let first = text.lines().next().unwrap_or("").trim();
     if first
         .get(..4)
@@ -167,8 +167,8 @@ fn detect_delimiter(text: &str) -> Result<(u8, Vec<(usize, Vec<String>)>), Strin
             return Ok((d, records(&rest, d)?));
         }
     }
-    let mut best: Option<(usize, u8, Vec<(usize, Vec<String>)>)> = None;
-    for d in [b'\t', b';', b','] {
+    let mut best: Option<(usize, u8, TableRows)> = None;
+    for d in *b"\t;," {
         let rows = records(text, d)?;
         let mut seen = 0;
         for (_, cells) in &rows {
@@ -234,19 +234,21 @@ fn number_text(s: &str) -> String {
 fn split_host_port(s: &str) -> (String, Option<String>) {
     let s = s.trim();
     if let Some(rest) = s.strip_prefix('[') {
-        if let Some((host, port)) = rest.split_once("]:") {
-            if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) {
-                return (host.into(), Some(port.into()));
-            }
+        if let Some((host, port)) = rest.split_once("]:")
+            && !port.is_empty()
+            && port.chars().all(|c| c.is_ascii_digit())
+        {
+            return (host.into(), Some(port.into()));
         }
         return (s.trim_matches(['[', ']']).into(), None);
     }
-    if s.matches(':').count() == 1 {
-        if let Some((host, port)) = s.rsplit_once(':') {
-            if !host.is_empty() && !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) {
-                return (host.into(), Some(port.into()));
-            }
-        }
+    if s.matches(':').count() == 1
+        && let Some((host, port)) = s.rsplit_once(':')
+        && !host.is_empty()
+        && !port.is_empty()
+        && port.chars().all(|c| c.is_ascii_digit())
+    {
+        return (host.into(), Some(port.into()));
     }
     (s.into(), None)
 }
