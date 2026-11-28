@@ -702,7 +702,10 @@ pub fn read_mobaxterm(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
             } else {
                 field(3).trim().to_owned()
             };
-            let comment = parts.get(5).map(|v| moba_unescape(v).trim().to_owned()).unwrap_or_default();
+            let comment = parts
+                .get(5)
+                .map(|v| moba_unescape(v).trim().to_owned())
+                .unwrap_or_default();
             let mut notes = comment;
 
             // Gateways and proxies are not represented by the common host
@@ -711,9 +714,15 @@ pub fn read_mobaxterm(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
             let has_jump = !field(8).trim_matches('|').trim().is_empty();
             let proxy_type = field(19).trim();
             if has_jump {
-                append_import_note(&mut notes, "MobaXterm jump host settings were not imported; this host connects directly.");
+                append_import_note(
+                    &mut notes,
+                    "MobaXterm jump host settings were not imported; this host connects directly.",
+                );
             } else if !proxy_type.is_empty() && proxy_type != "0" {
-                append_import_note(&mut notes, "MobaXterm proxy settings were not imported; this host connects directly.");
+                append_import_note(
+                    &mut notes,
+                    "MobaXterm proxy settings were not imported; this host connects directly.",
+                );
             }
 
             let mut host = Host {
@@ -786,10 +795,15 @@ pub fn read_mobaxterm(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
     flush(&mut pending, &folder, &mut out);
 
     if out.is_empty() {
-        return Err(ImportError("no SSH sessions found in MobaXterm file".into()));
+        return Err(ImportError(
+            "no SSH sessions found in MobaXterm file".into(),
+        ));
     }
     out.sort_by(|a, b| {
-        let folder_order = a.folders.iter().map(|s| s.to_lowercase())
+        let folder_order = a
+            .folders
+            .iter()
+            .map(|s| s.to_lowercase())
             .cmp(b.folders.iter().map(|s| s.to_lowercase()));
         folder_order.then_with(|| a.host.name.to_lowercase().cmp(&b.host.name.to_lowercase()))
     });
@@ -802,7 +816,8 @@ fn decode_mobaxterm_text(bytes: &[u8]) -> String {
     }
     if let Some(rest) = bytes.strip_prefix(&[0xff, 0xfe]) {
         return String::from_utf16_lossy(
-            &rest.chunks_exact(2)
+            &rest
+                .chunks_exact(2)
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect::<Vec<_>>(),
         );
@@ -821,7 +836,8 @@ fn decode_mobaxterm_text(bytes: &[u8]) -> String {
 }
 
 fn moba_unescape(value: &str) -> String {
-    value.replace("__PTVIRG__", ";")
+    value
+        .replace("__PTVIRG__", ";")
         .replace("__DBLQUO__", "\"")
         .replace("__PIPE__", "|")
         .replace("__PERCENT__", "%")
@@ -829,15 +845,18 @@ fn moba_unescape(value: &str) -> String {
 }
 
 fn is_mobaxterm_bookmarks_section(name: &str) -> bool {
-    let Some(rest) = name.get(..9).filter(|prefix| prefix.eq_ignore_ascii_case("Bookmarks")) else {
+    let Some(prefix) = name
+        .get(..9)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("Bookmarks"))
+    else {
         return false;
     };
-    let _ = rest;
     let suffix = &name[9..];
     if suffix.is_empty() {
         true
     } else {
-        suffix.strip_prefix('_')
+        suffix
+            .strip_prefix('_')
             .is_some_and(|n| !n.is_empty() && n.parse::<u32>().is_ok())
     }
 }
@@ -1148,11 +1167,20 @@ pub fn read_securecrt(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
 #[cfg(test)]
 mod mobaxterm_tests {
     use super::*;
-    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn sample_path() -> std::path::PathBuf {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("finalshell-moba-{}-{nonce}.mxtsessions", std::process::id()))
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "finalshell-moba-{}-{nonce}.mxtsessions",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -1170,12 +1198,21 @@ mod mobaxterm_tests {
         fs::write(&path, text).unwrap();
         let entries = read_mobaxterm(&path).unwrap();
         let _ = fs::remove_file(&path);
-        assert_eq!(entries.iter().map(|e| e.host.name.as_str()).collect::<Vec<_>>(), ["alpha", "zeta", "app", "db"]);
+        assert_eq!(
+            entries
+                .iter()
+                .map(|e| e.host.name.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "zeta", "app", "db"]
+        );
         assert_eq!(entries[0].host.user, "");
         assert!(entries[0].host.notes.contains("note#1;ok"));
         assert_eq!(entries[1].host.auth, AUTH_KEY);
         assert!(entries[1].needs_key && entries[1].host.key_path.is_empty());
-        assert!(entries[2].host.notes.contains("jump host settings were not imported"));
+        assert!(entries[2]
+            .host
+            .notes
+            .contains("jump host settings were not imported"));
         assert_eq!(entries[3].folders, ["Production", "Databases"]);
     }
 
@@ -1183,7 +1220,9 @@ mod mobaxterm_tests {
     fn decodes_utf16_and_gbk_and_recognizes_bookmark_sections() {
         let utf16 = "[Bookmarks]\nSubRep=实验室\n";
         let mut bytes = vec![0xff, 0xfe];
-        for unit in utf16.encode_utf16() { bytes.extend_from_slice(&unit.to_le_bytes()); }
+        for unit in utf16.encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
         assert_eq!(decode_mobaxterm_text(&bytes), utf16);
         assert!(is_mobaxterm_bookmarks_section("Bookmarks"));
         assert!(is_mobaxterm_bookmarks_section("bookmarks_12"));
