@@ -477,11 +477,17 @@ pub fn read_finalshell_dir(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry
 pub fn read_xshell(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, ImportError> {
     fn decode(bytes: &[u8]) -> String {
         if bytes.starts_with(&[0xff, 0xfe]) {
-            let words = bytes[2..].chunks_exact(2).map(|v| u16::from_le_bytes([v[0], v[1]])).collect::<Vec<_>>();
+            let words = bytes[2..]
+                .chunks_exact(2)
+                .map(|v| u16::from_le_bytes([v[0], v[1]]))
+                .collect::<Vec<_>>();
             return String::from_utf16_lossy(&words);
         }
         if bytes.starts_with(&[0xfe, 0xff]) {
-            let words = bytes[2..].chunks_exact(2).map(|v| u16::from_be_bytes([v[0], v[1]])).collect::<Vec<_>>();
+            let words = bytes[2..]
+                .chunks_exact(2)
+                .map(|v| u16::from_be_bytes([v[0], v[1]]))
+                .collect::<Vec<_>>();
             return String::from_utf16_lossy(&words);
         }
         if let Ok(s) = std::str::from_utf8(bytes) {
@@ -489,44 +495,99 @@ pub fn read_xshell(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Impor
         }
         encoding_rs::GBK.decode(bytes).0.into_owned()
     }
+
     fn parse(name: String, folders: Vec<String>, bytes: &[u8]) -> Option<FinalShellEntry> {
         let text = decode(bytes);
         let mut section = String::new();
         let mut values = std::collections::BTreeMap::<String, String>::new();
         for line in text.lines().map(str::trim) {
-            if line.is_empty() || line.starts_with(';') || line.starts_with('#') { continue; }
-            if line.starts_with('[') && line.ends_with(']') {
-                section = line[1..line.len()-1].trim().to_ascii_lowercase();
+            if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
                 continue;
             }
-            let Some((key, value)) = line.split_once('=') else { continue; };
+            if line.starts_with('[') && line.ends_with(']') {
+                section = line[1..line.len() - 1].trim().to_ascii_lowercase();
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
             let key = key.trim().to_ascii_lowercase();
-            if matches!(section.as_str(), "connection" | "connection:authentication" | "connection:proxy")
-                && matches!(key.as_str(), "host" | "port" | "protocol" | "description" | "username" | "method" | "userkey" | "proxy" | "firewall")
-            {
+            if matches!(
+                section.as_str(),
+                "connection" | "connection:authentication" | "connection:proxy"
+            ) && matches!(
+                key.as_str(),
+                "host"
+                    | "port"
+                    | "protocol"
+                    | "description"
+                    | "username"
+                    | "method"
+                    | "userkey"
+                    | "proxy"
+                    | "firewall"
+            ) {
                 values.insert(format!("{section}:{key}"), value.trim().to_owned());
             }
         }
-        let protocol = values.get("connection:protocol").map(String::as_str).unwrap_or("SSH");
-        if !protocol.to_ascii_uppercase().starts_with("SSH") { return None; }
+        let protocol = values
+            .get("connection:protocol")
+            .map(String::as_str)
+            .unwrap_or("SSH");
+        if !protocol.to_ascii_uppercase().starts_with("SSH") {
+            return None;
+        }
         let addr = values.get("connection:host")?.trim().to_owned();
-        if addr.is_empty() { return None; }
-        let method = values.get("connection:authentication:method").map(|s| s.to_ascii_uppercase()).unwrap_or_default();
-        let user_key = values.get("connection:authentication:userkey").is_some_and(|s| !s.is_empty());
-        let needs_key = method == "1" || method.contains("PUBLICKEY") || (method.is_empty() && user_key);
-        let port = values.get("connection:port").and_then(|s| s.parse::<u16>().ok()).filter(|p| *p > 0 && *p != 22).unwrap_or(0);
+        if addr.is_empty() {
+            return None;
+        }
+        let method = values
+            .get("connection:authentication:method")
+            .map(|s| s.to_ascii_uppercase())
+            .unwrap_or_default();
+        let user_key = values
+            .get("connection:authentication:userkey")
+            .is_some_and(|s| !s.is_empty());
+        let needs_key = method == "1"
+            || method.contains("PUBLICKEY")
+            || (method.is_empty() && user_key);
+        let port = values
+            .get("connection:port")
+            .and_then(|s| s.parse::<u16>().ok())
+            .filter(|p| *p > 0 && *p != 22)
+            .unwrap_or(0);
         let host = Host {
             name,
             addr,
             port,
-            user: values.get("connection:authentication:username").cloned().unwrap_or_default(),
-            auth: if needs_key { AUTH_KEY.into() } else { AUTH_PASSWORD.into() },
-            notes: values.get("connection:description").cloned().unwrap_or_default(),
+            user: values
+                .get("connection:authentication:username")
+                .cloned()
+                .unwrap_or_default(),
+            auth: if needs_key {
+                AUTH_KEY.into()
+            } else {
+                AUTH_PASSWORD.into()
+            },
+            notes: values
+                .get("connection:description")
+                .cloned()
+                .unwrap_or_default(),
             ..Host::default()
         };
-        Some(FinalShellEntry { host, folders, needs_key })
+        Some(FinalShellEntry {
+            host,
+            folders,
+            needs_key,
+        })
     }
-    fn walk(dir: &Path, folders: &[String], out: &mut Vec<FinalShellEntry>, count: &mut usize) -> Result<(), ImportError> {
+
+    fn walk(
+        dir: &Path,
+        folders: &[String],
+        out: &mut Vec<FinalShellEntry>,
+        count: &mut usize,
+    ) -> Result<(), ImportError> {
         for item in fs::read_dir(dir).map_err(|e| ImportError(format!("{}: {e}", dir.display())))? {
             let item = item.map_err(|e| ImportError(e.to_string()))?;
             let path = item.path();
@@ -538,27 +599,58 @@ pub fn read_xshell(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Impor
                 }
                 continue;
             }
-            if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("xsh")) { continue; }
+            if !path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("xsh"))
+            {
+                continue;
+            }
             *count += 1;
-            if *count > 10000 { return Err(ImportError("Xshell import exceeds 10000 files".into())); }
-            let bytes = fs::read(&path).map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
-            if bytes.len() > 1 << 20 { continue; }
-            let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-            if let Some(entry) = parse(name, folders.to_vec(), &bytes) { out.push(entry); }
+            if *count > 10000 {
+                return Err(ImportError("Xshell import exceeds 10000 files".into()));
+            }
+            let bytes =
+                fs::read(&path).map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
+            if bytes.len() > 1 << 20 {
+                continue;
+            }
+            let name = path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            if let Some(entry) = parse(name, folders.to_vec(), &bytes) {
+                out.push(entry);
+            }
         }
         Ok(())
     }
+
     let path = path.as_ref();
     let mut out = Vec::new();
     let mut count = 0;
     if path.is_file() {
-        let bytes = fs::read(path).map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
-        let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-        if let Some(entry) = parse(name, Vec::new(), &bytes) { out.push(entry); }
+        let bytes =
+            fs::read(path).map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
+        let name = path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        if let Some(entry) = parse(name, Vec::new(), &bytes) {
+            out.push(entry);
+        }
     } else {
-        let root = if path.join("Sessions").is_dir() { path.join("Sessions") } else { path.to_path_buf() };
+        let root = if path.join("Sessions").is_dir() {
+            path.join("Sessions")
+        } else {
+            path.to_path_buf()
+        };
         walk(&root, &[], &mut out, &mut count)?;
     }
-    if out.is_empty() { return Err(ImportError("no SSH sessions found in Xshell data".into())); }
+    if out.is_empty() {
+        return Err(ImportError("no SSH sessions found in Xshell data".into()));
+    }
     Ok(out)
 }

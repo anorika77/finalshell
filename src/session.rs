@@ -182,17 +182,29 @@ impl ConnectionManager {
         let mut folders = BTreeMap::<String, String>::new();
         for entry in entries {
             let host = entry.host;
-            let existing = self.store.hosts.iter().find(|candidate| {
-                !candidate.deleted() && candidate.addr.eq_ignore_ascii_case(&host.addr)
-                    && candidate.port_or_22() == host.port_or_22() && candidate.user == host.user
-            }).map(|candidate| candidate.id.clone());
-            if existing.is_some() { continue; }
+            let existing = self
+                .store
+                .hosts
+                .iter()
+                .find(|candidate| {
+                    !candidate.deleted()
+                        && candidate.addr.eq_ignore_ascii_case(&host.addr)
+                        && candidate.port_or_22() == host.port_or_22()
+                        && candidate.user == host.user
+                })
+                .map(|candidate| candidate.id.clone());
+            if existing.is_some() {
+                continue;
+            }
             let mut parent = String::new();
             for name in entry.folders {
                 let key = format!("{parent}/{name}");
-                parent = if let Some(id) = folders.get(&key) { id.clone() } else {
+                parent = if let Some(id) = folders.get(&key) {
+                    id.clone()
+                } else {
                     let id = self.store.add_folder(name, parent);
-                    folders.insert(key, id.clone()); id
+                    folders.insert(key, id.clone());
+                    id
                 };
             }
             let mut host = host;
@@ -200,13 +212,18 @@ impl ConnectionManager {
             self.store.add(host);
             imported.push(self.store.hosts.last().expect("host added").id.clone());
         }
-        if let Err(error) = self.save() { self.store = previous; return Err(error.into()); }
+        if let Err(error) = self.save() {
+            self.store = previous;
+            return Err(error.into());
+        }
         Ok(imported)
     }
 
-
     /// Import Xshell .xsh sessions; existing targets are not duplicated.
-    pub fn import_xshell(&mut self, path: impl AsRef<Path>) -> Result<Vec<String>, ConnectionError> {
+    pub fn import_xshell(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<Vec<String>, ConnectionError> {
         let entries = crate::importer::read_xshell(path)
             .map_err(|error| ConnectionError::Config(error.to_string()))?;
         let previous = self.store.clone();
@@ -216,19 +233,32 @@ impl ConnectionManager {
             let mut parent = String::new();
             for name in entry.folders {
                 let key = format!("{parent}/{name}");
-                parent = if let Some(id) = folders.get(&key) { id.clone() } else {
+                parent = if let Some(id) = folders.get(&key) {
+                    id.clone()
+                } else {
                     let id = self.store.add_folder(name, parent);
                     folders.insert(key, id.clone());
                     id
                 };
             }
             let mut host = entry.host;
-            if self.store.hosts.iter().any(|h| !h.deleted() && h.addr.eq_ignore_ascii_case(&host.addr) && h.port_or_22() == host.port_or_22() && h.user == host.user) { continue; }
+            let exists = self.store.hosts.iter().any(|candidate| {
+                !candidate.deleted()
+                    && candidate.addr.eq_ignore_ascii_case(&host.addr)
+                    && candidate.port_or_22() == host.port_or_22()
+                    && candidate.user == host.user
+            });
+            if exists {
+                continue;
+            }
             host.folder = parent;
             self.store.add(host);
             imported.push(self.store.hosts.last().expect("host added").id.clone());
         }
-        if let Err(error) = self.save() { self.store = previous; return Err(error.into()); }
+        if let Err(error) = self.save() {
+            self.store = previous;
+            return Err(error.into());
+        }
         Ok(imported)
     }
 
