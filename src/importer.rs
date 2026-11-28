@@ -824,7 +824,8 @@ fn decode_mobaxterm_text(bytes: &[u8]) -> String {
     }
     if let Some(rest) = bytes.strip_prefix(&[0xfe, 0xff]) {
         return String::from_utf16_lossy(
-            &rest.chunks_exact(2)
+            &rest
+                .chunks_exact(2)
                 .map(|c| u16::from_be_bytes([c[0], c[1]]))
                 .collect::<Vec<_>>(),
         );
@@ -1163,7 +1164,6 @@ pub fn read_securecrt(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
     Ok(out)
 }
 
-
 #[cfg(test)]
 mod mobaxterm_tests {
     use super::*;
@@ -1209,10 +1209,12 @@ mod mobaxterm_tests {
         assert!(entries[0].host.notes.contains("note#1;ok"));
         assert_eq!(entries[1].host.auth, AUTH_KEY);
         assert!(entries[1].needs_key && entries[1].host.key_path.is_empty());
-        assert!(entries[2]
-            .host
-            .notes
-            .contains("jump host settings were not imported"));
+        assert!(
+            entries[2]
+                .host
+                .notes
+                .contains("jump host settings were not imported")
+        );
         assert_eq!(entries[3].folders, ["Production", "Databases"]);
     }
 
