@@ -169,6 +169,38 @@ impl ConnectionManager {
         Ok(imported)
     }
 
+
+    /// Import FinalShell's native connection directory without importing encrypted secrets.
+    pub fn import_finalshell_dir(&mut self, path: impl AsRef<Path>) -> Result<Vec<String>, ConnectionError> {
+        let entries = crate::importer::read_finalshell_dir(path)
+            .map_err(|error| ConnectionError::Config(error.to_string()))?;
+        let previous = self.store.clone();
+        let mut imported = Vec::new();
+        let mut folders = BTreeMap::<String, String>::new();
+        for entry in entries {
+            let host = entry.host;
+            let existing = self.store.hosts.iter().find(|candidate| {
+                !candidate.deleted() && candidate.addr.eq_ignore_ascii_case(&host.addr)
+                    && candidate.port_or_22() == host.port_or_22() && candidate.user == host.user
+            }).map(|candidate| candidate.id.clone());
+            if existing.is_some() { continue; }
+            let mut parent = String::new();
+            for name in entry.folders {
+                let key = format!("{parent}/{name}");
+                parent = if let Some(id) = folders.get(&key) { id.clone() } else {
+                    let id = self.store.add_folder(name, parent);
+                    folders.insert(key, id.clone()); id
+                };
+            }
+            let mut host = host;
+            host.folder = parent;
+            self.store.add(host);
+            imported.push(self.store.hosts.last().expect("host added").id.clone());
+        }
+        if let Err(error) = self.save() { self.store = previous; return Err(error.into()); }
+        Ok(imported)
+    }
+
     pub fn save(&self) -> Result<(), ConfigError> {
         self.store.save(&self.config_path)
     }
