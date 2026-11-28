@@ -120,13 +120,19 @@ fn decode_text(data: &[u8]) -> String {
     }
     if data.starts_with(&[0xff, 0xfe]) {
         let u = data[2..]
-            .as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| u16::from_le_bytes(*b))
             .collect::<Vec<_>>();
         return String::from_utf16_lossy(&u);
     }
     if data.starts_with(&[0xfe, 0xff]) {
         let u = data[2..]
-            .as_chunks::<2>().0.iter().map(|b| u16::from_be_bytes(*b))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| u16::from_be_bytes(*b))
             .collect::<Vec<_>>();
         return String::from_utf16_lossy(&u);
     }
