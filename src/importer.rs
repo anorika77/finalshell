@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, fs, path::Path};
 
 use crate::config::{AUTH_KEY, AUTH_PASSWORD, Host};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SshConfigEntry {
     pub host: Host,
     pub proxy_jump: Option<String>,
@@ -329,7 +329,7 @@ mod tests {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FinalShellEntry {
     pub host: Host,
     pub folders: Vec<String>,
