@@ -8,7 +8,7 @@ use crate::{
     config::{
         AUTH_AGENT, AUTH_KEY, AUTH_KEYBOARD_INTERACTIVE, AUTH_PASSWORD, ConfigError, Host, Store,
     },
-    importer::{parse_ssh_config, FinalShellEntry},
+    importer::{FinalShellEntry, parse_ssh_config},
     ssh::{SshClient, SshCredentials, SshError, SshOptions},
 };
 

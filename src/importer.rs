@@ -365,9 +365,7 @@ impl ImportPreview {
         for entry in entries {
             let duplicate_of = existing
                 .iter()
-                .find(|host| {
-                    host.deleted_at.is_empty() && same_import_target(host, &entry.host)
-                })
+                .find(|host| host.deleted_at.is_empty() && same_import_target(host, &entry.host))
                 .map(|host| ImportDuplicate::Existing(host.id.clone()))
                 .or_else(|| {
                     rows.iter()
