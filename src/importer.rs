@@ -363,11 +363,17 @@ impl ImportPreview {
     pub fn new(entries: Vec<FinalShellEntry>, existing: &[Host]) -> Self {
         let mut rows: Vec<ImportPreviewRow> = Vec::with_capacity(entries.len());
         for entry in entries {
-            let duplicate_of = existing.iter()
-                .find(|host| host.deleted_at.is_empty() && same_import_target(host, &entry.host))
+            let duplicate_of = existing
+                .iter()
+                .find(|host| {
+                    host.deleted_at.is_empty() && same_import_target(host, &entry.host)
+                })
                 .map(|host| ImportDuplicate::Existing(host.id.clone()))
-                .or_else(|| rows.iter().position(|row| same_import_target(&row.entry.host, &entry.host))
-                    .map(ImportDuplicate::Earlier));
+                .or_else(|| {
+                    rows.iter()
+                        .position(|row| same_import_target(&row.entry.host, &entry.host))
+                        .map(ImportDuplicate::Earlier)
+                });
             rows.push(ImportPreviewRow {
                 selected: duplicate_of.is_none(),
                 entry,
@@ -378,7 +384,10 @@ impl ImportPreview {
     }
 
     pub fn selected_count(&self) -> usize {
-        self.rows.iter().filter(|row| row.selected && row.duplicate_of.is_none()).count()
+        self.rows
+            .iter()
+            .filter(|row| row.selected && row.duplicate_of.is_none())
+            .count()
     }
 
     pub fn set_all(&mut self, selected: bool) {
@@ -388,13 +397,16 @@ impl ImportPreview {
     }
 
     pub fn set_selected(&mut self, index: usize, selected: bool) -> bool {
-        let Some(row) = self.rows.get_mut(index) else { return false };
+        let Some(row) = self.rows.get_mut(index) else {
+            return false;
+        };
         row.selected = selected && row.duplicate_of.is_none();
         true
     }
 
     pub fn selected_entries(&self) -> Vec<FinalShellEntry> {
-        self.rows.iter()
+        self.rows
+            .iter()
             .filter(|row| row.selected && row.duplicate_of.is_none())
             .map(|row| row.entry.clone())
             .collect()
@@ -404,7 +416,9 @@ impl ImportPreview {
 fn same_import_target(left: &Host, right: &Host) -> bool {
     let left_port = if left.port == 0 { 22 } else { left.port };
     let right_port = if right.port == 0 { 22 } else { right.port };
-    left.addr.eq_ignore_ascii_case(&right.addr) && left_port == right_port && left.user == right.user
+    left.addr.eq_ignore_ascii_case(&right.addr)
+        && left_port == right_port
+        && left.user == right.user
 }
 
 /// Read FinalShell's native data directory or an exported connection folder.
@@ -1241,7 +1255,13 @@ mod import_preview_tests {
 
     fn entry(name: &str, addr: &str, port: u16, user: &str) -> FinalShellEntry {
         FinalShellEntry {
-            host: Host { name: name.into(), addr: addr.into(), port, user: user.into(), ..Host::default() },
+            host: Host {
+                name: name.into(),
+                addr: addr.into(),
+                port,
+                user: user.into(),
+                ..Host::default()
+            },
             folders: Vec::new(),
             needs_key: false,
         }
@@ -1250,21 +1270,40 @@ mod import_preview_tests {
     #[test]
     fn preview_deduplicates_existing_and_source_rows_and_controls_selection() {
         let existing = Host {
-            id: "present".into(), addr: "EXAMPLE.com".into(), port: 22,
-            user: "ops".into(), ..Host::default()
+            id: "present".into(),
+            addr: "EXAMPLE.com".into(),
+            port: 22,
+            user: "ops".into(),
+            ..Host::default()
         };
-        let mut preview = ImportPreview::new(vec![
-            entry("present", "example.com", 0, "ops"),
-            entry("first", "new.example", 22, "root"),
-            entry("duplicate", "NEW.example", 0, "root"),
-            entry("different-user", "new.example", 22, "admin"),
-        ], &[existing]);
+        let mut preview = ImportPreview::new(
+            vec![
+                entry("present", "example.com", 0, "ops"),
+                entry("first", "new.example", 22, "root"),
+                entry("duplicate", "NEW.example", 0, "root"),
+                entry("different-user", "new.example", 22, "admin"),
+            ],
+            &[existing],
+        );
         assert_eq!(preview.selected_count(), 2);
-        assert_eq!(preview.rows[0].duplicate_of, Some(ImportDuplicate::Existing("present".into())));
-        assert_eq!(preview.rows[2].duplicate_of, Some(ImportDuplicate::Earlier(1)));
+        assert_eq!(
+            preview.rows[0].duplicate_of,
+            Some(ImportDuplicate::Existing("present".into()))
+        );
+        assert_eq!(
+            preview.rows[2].duplicate_of,
+            Some(ImportDuplicate::Earlier(1))
+        );
         assert!(preview.set_selected(0, true));
         assert_eq!(preview.selected_count(), 2);
-        assert_eq!(preview.selected_entries().iter().map(|e| e.host.name.as_str()).collect::<Vec<_>>(), ["first", "different-user"]);
+        assert_eq!(
+            preview
+                .selected_entries()
+                .iter()
+                .map(|e| e.host.name.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "different-user"]
+        );
         preview.set_all(false);
         assert_eq!(preview.selected_count(), 0);
         preview.set_all(true);
