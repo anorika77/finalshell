@@ -7,7 +7,7 @@ const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 const MAX_ROWS: usize = 10_000;
 const HEADER_ROWS: usize = 10;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TableEntry {
     pub host: Host,
     pub folders: Vec<String>,
@@ -22,7 +22,7 @@ pub struct TableProblem {
     pub reason: &'static str,
     pub detail: String,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct TableImport {
     pub entries: Vec<TableEntry>,
     pub problems: Vec<TableProblem>,
