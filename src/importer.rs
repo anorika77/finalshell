@@ -144,7 +144,7 @@ pub fn parse_ssh_config(text: &str, local_user: &str) -> Result<Vec<SshConfigEnt
         let proxy_jump = settings
             .proxy_jump
             .filter(|value| !value.eq_ignore_ascii_case("none"))
-            .map(|value| value.split(',').last().unwrap_or("").trim().to_owned())
+            .map(|value| value.split(',').next_back().unwrap_or("").trim().to_owned())
             .filter(|value| !value.is_empty());
         out.push(SshConfigEntry { host, proxy_jump });
     }
@@ -366,6 +366,7 @@ pub fn read_finalshell_dir(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry
     fn number(v: Option<&Value>) -> i64 {
         text(v).parse().unwrap_or(0)
     }
+    #[allow(clippy::too_many_arguments)]
     fn walk(
         dir: &Path,
         root: &Path,
@@ -480,15 +481,19 @@ pub fn read_xshell(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Impor
     fn decode(bytes: &[u8]) -> String {
         if bytes.starts_with(&[0xff, 0xfe]) {
             let words = bytes[2..]
-                .chunks_exact(2)
-                .map(|v| u16::from_le_bytes([v[0], v[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|v| u16::from_le_bytes(*v))
                 .collect::<Vec<_>>();
             return String::from_utf16_lossy(&words);
         }
         if bytes.starts_with(&[0xfe, 0xff]) {
             let words = bytes[2..]
-                .chunks_exact(2)
-                .map(|v| u16::from_be_bytes([v[0], v[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|v| u16::from_be_bytes(*v))
                 .collect::<Vec<_>>();
             return String::from_utf16_lossy(&words);
         }
