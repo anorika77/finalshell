@@ -661,75 +661,82 @@ pub fn read_xshell(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Impor
 }
 
 /// Read MobaXterm INI or exported session files; encrypted passwords are skipped.
+/// The format is shared by MobaXterm.ini, .mxtsessions exports and .moba sessions.
 pub fn read_mobaxterm(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, ImportError> {
     let path = path.as_ref();
     let bytes = fs::read(path).map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
-    if bytes.len() > 16 * 1024 * 1024 {
-        return Err(ImportError("MobaXterm file exceeds 16 MiB".into()));
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Err(ImportError("MobaXterm file exceeds 8 MiB".into()));
     }
-    let text = if let Ok(s) = std::str::from_utf8(&bytes) {
-        s.to_owned()
-    } else {
-        encoding_rs::GBK.decode(&bytes).0.into_owned()
-    };
-    fn unescape(v: &str) -> String {
-        v.replace("__PTVIRG__", ";")
-            .replace("__DBLQUO__", "\"")
-            .replace("__PIPE__", "|")
-            .replace("__PERCENT__", "%")
-            .replace("__DIEZE__", "#")
-    }
+    let text = decode_mobaxterm_text(&bytes);
+
     let mut out = Vec::new();
     let mut folder = Vec::<String>::new();
     let mut bookmarks = false;
     let mut header = true;
     let mut pending = Vec::<(String, String)>::new();
+
     let flush = |pending: &mut Vec<(String, String)>,
                  folders: &[String],
                  out: &mut Vec<FinalShellEntry>| {
-        for (name, value) in pending.drain(..) {
+        for (raw_name, value) in pending.drain(..) {
             let parts = value.split('#').collect::<Vec<_>>();
             if parts.len() < 3 {
                 continue;
             }
-            let fields = parts[2].split('%').map(unescape).collect::<Vec<_>>();
+            let fields = parts[2].split('%').map(moba_unescape).collect::<Vec<_>>();
             let field = |n: usize| fields.get(n).map(String::as_str).unwrap_or("");
             if (!field(0).is_empty() && field(0) != "0") || field(1).trim().is_empty() {
                 continue;
             }
+
+            let name = moba_unescape(&raw_name).trim().to_owned();
+            let addr = field(1).trim().to_owned();
             let port = field(2)
                 .parse::<u16>()
                 .ok()
                 .filter(|p| *p > 0 && *p != 22)
                 .unwrap_or(0);
-            let key = field(14).replace("_CurrentDrive_", "C");
-            let needs_key = !key.is_empty();
-            let host = Host {
-                name: unescape(&name).trim().to_owned(),
-                addr: field(1).trim().to_owned(),
+            let user = if field(3) == "<default>" {
+                String::new()
+            } else {
+                field(3).trim().to_owned()
+            };
+            let comment = parts.get(5).map(|v| moba_unescape(v).trim().to_owned()).unwrap_or_default();
+            let mut notes = comment;
+
+            // Gateways and proxies are not represented by the common host
+            // profile yet. Keep an explicit warning instead of silently
+            // turning these sessions into direct connections.
+            let has_jump = !field(8).trim_matches('|').trim().is_empty();
+            let proxy_type = field(19).trim();
+            if has_jump {
+                append_import_note(&mut notes, "MobaXterm jump host settings were not imported; this host connects directly.");
+            } else if !proxy_type.is_empty() && proxy_type != "0" {
+                append_import_note(&mut notes, "MobaXterm proxy settings were not imported; this host connects directly.");
+            }
+
+            let mut host = Host {
+                name,
+                addr,
                 port,
-                user: if field(3) == "<default>" {
-                    String::new()
-                } else {
-                    field(3).to_owned()
-                },
-                auth: if needs_key {
-                    AUTH_KEY.into()
-                } else {
-                    AUTH_PASSWORD.into()
-                },
-                key_path: if key.starts_with(r"\\") || (key.len() > 2 && key.as_bytes()[1] == b':')
-                {
-                    key
-                } else {
-                    String::new()
-                },
-                notes: parts
-                    .get(5)
-                    .map(|v| unescape(v).trim().to_owned())
-                    .unwrap_or_default(),
+                user,
+                auth: AUTH_PASSWORD.into(),
+                notes,
                 ..Host::default()
             };
+            let key_path = moba_key_path(field(14));
+            let mut needs_key = false;
+            if !key_path.is_empty() {
+                host.auth = AUTH_KEY.into();
+                if is_windows_path(&key_path) && !cfg!(windows) {
+                    // The path belongs to the Windows machine that ran
+                    // MobaXterm, not this host. Ask the user to select it.
+                    needs_key = true;
+                } else {
+                    host.key_path = key_path;
+                }
+            }
             out.push(FinalShellEntry {
                 host,
                 folders: folders.to_vec(),
@@ -737,6 +744,7 @@ pub fn read_mobaxterm(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
             });
         }
     };
+
     for raw in text.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with(';') {
@@ -744,11 +752,8 @@ pub fn read_mobaxterm(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
         }
         if line.starts_with('[') && line.ends_with(']') {
             flush(&mut pending, &folder, &mut out);
-            let section = line[1..line.len() - 1].trim().to_ascii_lowercase();
-            bookmarks = section == "bookmarks"
-                || section
-                    .strip_prefix("bookmarks_")
-                    .is_some_and(|n| !n.is_empty() && n.parse::<u32>().is_ok());
+            let section = line[1..line.len() - 1].trim();
+            bookmarks = is_mobaxterm_bookmarks_section(section);
             header = false;
             folder.clear();
             continue;
@@ -759,29 +764,109 @@ pub fn read_mobaxterm(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        if bookmarks && key.trim().eq_ignore_ascii_case("SubRep") {
+        let key = key.trim();
+        if bookmarks && key.eq_ignore_ascii_case("SubRep") {
             folder = value
                 .split('\\')
-                .map(|s| unescape(s).trim().to_owned())
+                .map(|s| moba_unescape(s).trim().to_owned())
                 .filter(|s| !s.is_empty())
                 .collect();
             continue;
         }
-        if bookmarks && key.trim().eq_ignore_ascii_case("ImgNum") {
+        if bookmarks && key.eq_ignore_ascii_case("ImgNum") {
             continue;
         }
         if header && value.matches('#').count() < 2 {
             continue;
         }
-        pending.push((key.trim().to_owned(), value.trim().to_owned()));
+        if !key.is_empty() {
+            pending.push((key.to_owned(), value.trim().to_owned()));
+        }
     }
     flush(&mut pending, &folder, &mut out);
+
     if out.is_empty() {
-        return Err(ImportError(
-            "no SSH sessions found in MobaXterm file".into(),
-        ));
+        return Err(ImportError("no SSH sessions found in MobaXterm file".into()));
     }
+    out.sort_by(|a, b| {
+        let folder_order = a.folders.iter().map(|s| s.to_lowercase())
+            .cmp(b.folders.iter().map(|s| s.to_lowercase()));
+        folder_order.then_with(|| a.host.name.to_lowercase().cmp(&b.host.name.to_lowercase()))
+    });
     Ok(out)
+}
+
+fn decode_mobaxterm_text(bytes: &[u8]) -> String {
+    if let Some(rest) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
+        return String::from_utf8_lossy(rest).into_owned();
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xff, 0xfe]) {
+        return String::from_utf16_lossy(
+            &rest.chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect::<Vec<_>>(),
+        );
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xfe, 0xff]) {
+        return String::from_utf16_lossy(
+            &rest.chunks_exact(2)
+                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .collect::<Vec<_>>(),
+        );
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_owned(),
+        Err(_) => encoding_rs::GBK.decode(bytes).0.into_owned(),
+    }
+}
+
+fn moba_unescape(value: &str) -> String {
+    value.replace("__PTVIRG__", ";")
+        .replace("__DBLQUO__", "\"")
+        .replace("__PIPE__", "|")
+        .replace("__PERCENT__", "%")
+        .replace("__DIEZE__", "#")
+}
+
+fn is_mobaxterm_bookmarks_section(name: &str) -> bool {
+    let Some(rest) = name.get(..9).filter(|prefix| prefix.eq_ignore_ascii_case("Bookmarks")) else {
+        return false;
+    };
+    let _ = rest;
+    let suffix = &name[9..];
+    if suffix.is_empty() {
+        true
+    } else {
+        suffix.strip_prefix('_')
+            .is_some_and(|n| !n.is_empty() && n.parse::<u32>().is_ok())
+    }
+}
+
+fn moba_key_path(path: &str) -> String {
+    let path = if let Some(rest) = path.strip_prefix("_CurrentDrive_") {
+        if rest.starts_with('\\') || rest.starts_with('/') {
+            format!("C:{rest}")
+        } else {
+            path.to_owned()
+        }
+    } else {
+        path.to_owned()
+    };
+    path.replace("_CurrentDrive_", "C")
+}
+
+fn is_windows_path(path: &str) -> bool {
+    path.starts_with("\\\\")
+        || (path.len() >= 2
+            && path.as_bytes()[1] == b':'
+            && path.as_bytes()[0].is_ascii_alphabetic())
+}
+
+fn append_import_note(notes: &mut String, note: &str) {
+    if !notes.is_empty() {
+        notes.push_str("\n\n");
+    }
+    notes.push_str(note);
 }
 
 /// Parse one SecureCRT session file. Secret/password fields are ignored.
@@ -1057,4 +1142,55 @@ pub fn read_securecrt(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
         )));
     }
     Ok(out)
+}
+
+
+#[cfg(test)]
+mod mobaxterm_tests {
+    use super::*;
+    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+
+    fn sample_path() -> std::path::PathBuf {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("finalshell-moba-{}-{nonce}.mxtsessions", std::process::id()))
+    }
+
+    #[test]
+    fn imports_bookmarks_folders_keys_and_unsupported_routes() {
+        let path = sample_path();
+        let text = concat!(
+            "[Bookmarks]\nSubRep=Production\n",
+            "zeta= #109#0%192.0.2.2%2222%ops%%-1%-1%%%%%0%0%0%_CurrentDrive_:\\keys\\id_ed25519%%-1%0%0%0%%1080%%0%0%1%%0%%%%0%-1%-1%0%%%0%#font#10#0#0#-1#15#x#x#x#0#-1#0%%xterm#-1#0#colors#80#24#0#1#-1#<none>%%0#0#-1#-1#0#comment#-1\n",
+            "app= #109#0%192.0.2.3%22%app%%-1%-1%%jump.example.com__PIPE__gw.example.com%22__PIPE__22%ops__PIPE__root%0%0%0%%__PIPE__%-1%0%0%0%%1080%%0%0%1%%0%%%%0%-1%-1%0%%%0%#font#10#0#0#-1#15#x#x#x#0#-1#0%%xterm#-1#0#colors#80#24#0#1#-1#<none>%%0#0#-1#-1#0#jumped#-1\n",
+            "alpha= #109#0%192.0.2.1%22%<default>%%-1%-1%%%%%0%0%0%%%-1%0%0%0%%1080%%0%0%1%%0%%%%0%-1%-1%0%%%0%#font#10#0#0#-1#15#x#x#x#0#-1#0%%xterm#-1#0#colors#80#24#0#1#-1#<none>%%0#0#-1#-1#0#note__DIEZE__1__PTVIRG__ok#-1\n",
+            "[Passwords]\nignored=#109#0%198.51.100.1\n",
+            "[Bookmarks_2]\nSubRep=Production\\Databases\n",
+            "db= #109#0%db.example.com%5022%postgres%%%%%%%%%%%%%%0%0%0%%%-1%0%0%0%%1080%%0%0%1%%0%%%%0%-1%-1%0%%%0%#font#10#0#0#-1#15#x#x#x#0#-1#0%%xterm#-1#0#colors#80#24#0#1#-1#<none>%%0#0#-1#-1#0#primary#-1\n"
+        );
+        fs::write(&path, text).unwrap();
+        let entries = read_mobaxterm(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        assert_eq!(entries.iter().map(|e| e.host.name.as_str()).collect::<Vec<_>>(), ["alpha", "zeta", "app", "db"]);
+        assert_eq!(entries[0].host.user, "");
+        assert!(entries[0].host.notes.contains("note#1;ok"));
+        assert_eq!(entries[1].host.auth, AUTH_KEY);
+        assert!(entries[1].needs_key && entries[1].host.key_path.is_empty());
+        assert!(entries[2].host.notes.contains("jump host settings were not imported"));
+        assert_eq!(entries[3].folders, ["Production", "Databases"]);
+    }
+
+    #[test]
+    fn decodes_utf16_and_gbk_and_recognizes_bookmark_sections() {
+        let utf16 = "[Bookmarks]\nSubRep=实验室\n";
+        let mut bytes = vec![0xff, 0xfe];
+        for unit in utf16.encode_utf16() { bytes.extend_from_slice(&unit.to_le_bytes()); }
+        assert_eq!(decode_mobaxterm_text(&bytes), utf16);
+        assert!(is_mobaxterm_bookmarks_section("Bookmarks"));
+        assert!(is_mobaxterm_bookmarks_section("bookmarks_12"));
+        assert!(!is_mobaxterm_bookmarks_section("Bookmarks_x"));
+        assert!(!is_mobaxterm_bookmarks_section("Bookmarks1"));
+        assert!(is_windows_path(r"C:\keys\id_rsa"));
+        assert!(is_windows_path(r"\\nas\keys\id_rsa"));
+        assert!(!is_windows_path("/home/user/.ssh/id_rsa"));
+    }
 }
