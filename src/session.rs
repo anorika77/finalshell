@@ -151,14 +151,14 @@ impl ConnectionManager {
                         .find(|host| host.name.eq_ignore_ascii_case(&alias))
                         .map(|host| host.id.clone())
                 });
-            if let Some(jump_id) = jump_id.filter(|jump_id| jump_id != &id) {
-                if let Some(host) = self.store.host_mut(&id) {
-                    host.proxy = Some(crate::config::ProxyConfig {
-                        kind: "jump".into(),
-                        jump_host: jump_id,
-                        ..Default::default()
-                    });
-                }
+            if let Some(jump_id) = jump_id.filter(|jump_id| jump_id != &id)
+                && let Some(host) = self.store.host_mut(&id)
+            {
+                host.proxy = Some(crate::config::ProxyConfig {
+                    kind: "jump".into(),
+                    jump_host: jump_id,
+                    ..Default::default()
+                });
             }
         }
 

@@ -96,10 +96,10 @@ pub fn parse_ssh_config(text: &str, local_user: &str) -> Result<Vec<SshConfigEnt
                     settings.hostname = Some(value.clone());
                 }
                 "port" if settings.port.is_none() => {
-                    if let Ok(port) = value.parse::<u16>() {
-                        if port > 0 {
-                            settings.port = Some(port);
-                        }
+                    if let Ok(port) = value.parse::<u16>()
+                        && port > 0
+                    {
+                        settings.port = Some(port);
                     }
                 }
                 "user" if settings.user.is_none() => {
@@ -386,10 +386,10 @@ pub fn read_finalshell_dir(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry
                     names.push(name);
                 }
             }
-        } else if dir != root {
-            if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
-                names.push(name.to_owned());
-            }
+        } else if dir != root
+            && let Some(name) = dir.file_name().and_then(|n| n.to_str())
+        {
+            names.push(name.to_owned());
         }
         let entries =
             fs::read_dir(dir).map_err(|e| ImportError(format!("{}: {e}", dir.display())))?;
