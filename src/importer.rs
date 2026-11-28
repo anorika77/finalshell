@@ -817,16 +817,20 @@ fn decode_mobaxterm_text(bytes: &[u8]) -> String {
     if let Some(rest) = bytes.strip_prefix(&[0xff, 0xfe]) {
         return String::from_utf16_lossy(
             &rest
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_le_bytes(*c))
                 .collect::<Vec<_>>(),
         );
     }
     if let Some(rest) = bytes.strip_prefix(&[0xfe, 0xff]) {
         return String::from_utf16_lossy(
             &rest
-                .chunks_exact(2)
-                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_be_bytes(*c))
                 .collect::<Vec<_>>(),
         );
     }
@@ -846,12 +850,12 @@ fn moba_unescape(value: &str) -> String {
 }
 
 fn is_mobaxterm_bookmarks_section(name: &str) -> bool {
-    let Some(prefix) = name
+    if !name
         .get(..9)
-        .filter(|prefix| prefix.eq_ignore_ascii_case("Bookmarks"))
-    else {
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("Bookmarks"))
+    {
         return false;
-    };
+    }
     let suffix = &name[9..];
     if suffix.is_empty() {
         true
