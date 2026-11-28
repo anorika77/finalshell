@@ -5,10 +5,10 @@ use std::{
 };
 
 use crate::{
-    importer::parse_ssh_config,
     config::{
         AUTH_AGENT, AUTH_KEY, AUTH_KEYBOARD_INTERACTIVE, AUTH_PASSWORD, ConfigError, Host, Store,
     },
+    importer::parse_ssh_config,
     ssh::{SshClient, SshCredentials, SshError, SshOptions},
 };
 
@@ -102,9 +102,13 @@ impl ConnectionManager {
 
     /// Import OpenSSH client profiles. Existing targets are left untouched;
     /// passwords are never read from or written to the SSH config.
-    pub fn import_ssh_config(&mut self, text: &str, local_user: &str) -> Result<Vec<String>, ConnectionError> {
+    pub fn import_ssh_config(
+        &mut self,
+        text: &str,
+        local_user: &str,
+    ) -> Result<Vec<String>, ConnectionError> {
         let entries = parse_ssh_config(text, local_user)
-            .map_err(|e| ConnectionError::Config(e.to_string()))?;
+            .map_err(|error| ConnectionError::Config(error.to_string()))?;
         let previous = self.store.clone();
         let mut imported = Vec::new();
         let mut aliases = BTreeMap::<String, String>::new();
@@ -112,10 +116,17 @@ impl ConnectionManager {
 
         for entry in entries {
             let host = entry.host;
-            let existing = self.store.hosts.iter().find(|h| {
-                !h.deleted() && h.addr.eq_ignore_ascii_case(&host.addr)
-                    && h.port_or_22() == host.port_or_22() && h.user == host.user
-            }).map(|h| h.id.clone());
+            let existing = self
+                .store
+                .hosts
+                .iter()
+                .find(|candidate| {
+                    !candidate.deleted()
+                        && candidate.addr.eq_ignore_ascii_case(&host.addr)
+                        && candidate.port_or_22() == host.port_or_22()
+                        && candidate.user == host.user
+                })
+                .map(|candidate| candidate.id.clone());
             let id = if let Some(id) = existing {
                 id
             } else {
@@ -129,19 +140,29 @@ impl ConnectionManager {
                 pending.push((id, jump));
             }
         }
+
         for (id, alias) in pending {
-            let jump_id = aliases.get(&alias.to_ascii_lowercase()).cloned().or_else(|| {
-                self.store.hosts.iter().find(|h| h.name.eq_ignore_ascii_case(&alias))
-                    .map(|h| h.id.clone())
-            });
+            let jump_id = aliases
+                .get(&alias.to_ascii_lowercase())
+                .cloned()
+                .or_else(|| {
+                    self.store
+                        .hosts
+                        .iter()
+                        .find(|host| host.name.eq_ignore_ascii_case(&alias))
+                        .map(|host| host.id.clone())
+                });
             if let Some(jump_id) = jump_id.filter(|jump_id| jump_id != &id) {
                 if let Some(host) = self.store.host_mut(&id) {
                     host.proxy = Some(crate::config::ProxyConfig {
-                        kind: "jump".into(), jump_host: jump_id, ..Default::default()
+                        kind: "jump".into(),
+                        jump_host: jump_id,
+                        ..Default::default()
                     });
                 }
             }
         }
+
         if let Err(error) = self.save() {
             self.store = previous;
             return Err(error.into());
