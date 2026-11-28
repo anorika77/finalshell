@@ -361,11 +361,15 @@ impl ConnectionManager {
                     && candidate.addr.eq_ignore_ascii_case(&host.addr)
                     && candidate.port_or_22() == host.port_or_22()
                     && candidate.user == host.user
-            }) { continue; }
+            }) {
+                continue;
+            }
             let mut parent = String::new();
             for name in entry.folders {
                 let key = format!("{parent}/{name}");
-                parent = if let Some(id) = folders.get(&key) { id.clone() } else {
+                parent = if let Some(id) = folders.get(&key) {
+                    id.clone()
+                } else {
                     let id = self.store.add_folder(name, parent);
                     folders.insert(key, id.clone());
                     id

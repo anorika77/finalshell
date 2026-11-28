@@ -4,11 +4,11 @@ pub mod importer;
 pub mod session;
 pub mod sftp;
 pub mod ssh;
+pub mod table_import;
 pub mod terminal;
 pub mod terminal_input;
 pub mod terminal_manager;
 pub mod terminal_screen;
-pub mod table_import;
 
 fn main() {
     println!("FinalShell Rust rewrite");
