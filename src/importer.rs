@@ -329,7 +329,6 @@ mod tests {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FinalShellEntry {
     pub host: Host,
@@ -471,7 +470,6 @@ pub fn read_finalshell_dir(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry
     Ok(out)
 }
 
-
 /// Read Xshell session files (.xsh) from a Sessions directory or one file.
 /// Passwords and Xshell's private key store are intentionally not imported.
 pub fn read_xshell(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, ImportError> {
@@ -548,9 +546,8 @@ pub fn read_xshell(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Impor
         let user_key = values
             .get("connection:authentication:userkey")
             .is_some_and(|s| !s.is_empty());
-        let needs_key = method == "1"
-            || method.contains("PUBLICKEY")
-            || (method.is_empty() && user_key);
+        let needs_key =
+            method == "1" || method.contains("PUBLICKEY") || (method.is_empty() && user_key);
         let port = values
             .get("connection:port")
             .and_then(|s| s.parse::<u16>().ok())
@@ -631,8 +628,7 @@ pub fn read_xshell(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Impor
     let mut out = Vec::new();
     let mut count = 0;
     if path.is_file() {
-        let bytes =
-            fs::read(path).map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
+        let bytes = fs::read(path).map_err(|e| ImportError(format!("{}: {e}", path.display())))?;
         let name = path
             .file_stem()
             .unwrap_or_default()
@@ -669,59 +665,113 @@ pub fn read_mobaxterm(path: impl AsRef<Path>) -> Result<Vec<FinalShellEntry>, Im
         encoding_rs::GBK.decode(&bytes).0.into_owned()
     };
     fn unescape(v: &str) -> String {
-        v.replace("__PTVIRG__", ";").replace("__DBLQUO__", "\"")
-            .replace("__PIPE__", "|").replace("__PERCENT__", "%").replace("__DIEZE__", "#")
+        v.replace("__PTVIRG__", ";")
+            .replace("__DBLQUO__", "\"")
+            .replace("__PIPE__", "|")
+            .replace("__PERCENT__", "%")
+            .replace("__DIEZE__", "#")
     }
     let mut out = Vec::new();
     let mut folder = Vec::<String>::new();
     let mut bookmarks = false;
     let mut header = true;
     let mut pending = Vec::<(String, String)>::new();
-    let flush = |pending: &mut Vec<(String, String)>, folders: &[String], out: &mut Vec<FinalShellEntry>| {
+    let flush = |pending: &mut Vec<(String, String)>,
+                 folders: &[String],
+                 out: &mut Vec<FinalShellEntry>| {
         for (name, value) in pending.drain(..) {
             let parts = value.split('#').collect::<Vec<_>>();
-            if parts.len() < 3 { continue; }
+            if parts.len() < 3 {
+                continue;
+            }
             let fields = parts[2].split('%').map(unescape).collect::<Vec<_>>();
             let field = |n: usize| fields.get(n).map(String::as_str).unwrap_or("");
-            if (!field(0).is_empty() && field(0) != "0") || field(1).trim().is_empty() { continue; }
-            let port = field(2).parse::<u16>().ok().filter(|p| *p > 0 && *p != 22).unwrap_or(0);
+            if (!field(0).is_empty() && field(0) != "0") || field(1).trim().is_empty() {
+                continue;
+            }
+            let port = field(2)
+                .parse::<u16>()
+                .ok()
+                .filter(|p| *p > 0 && *p != 22)
+                .unwrap_or(0);
             let key = field(14).replace("_CurrentDrive_", "C");
             let needs_key = !key.is_empty();
             let host = Host {
                 name: unescape(&name).trim().to_owned(),
                 addr: field(1).trim().to_owned(),
                 port,
-                user: if field(3) == "<default>" { String::new() } else { field(3).to_owned() },
-                auth: if needs_key { AUTH_KEY.into() } else { AUTH_PASSWORD.into() },
-                key_path: if key.starts_with(r"\\") || (key.len() > 2 && key.as_bytes()[1] == b':') { key } else { String::new() },
-                notes: parts.get(5).map(|v| unescape(v).trim().to_owned()).unwrap_or_default(),
+                user: if field(3) == "<default>" {
+                    String::new()
+                } else {
+                    field(3).to_owned()
+                },
+                auth: if needs_key {
+                    AUTH_KEY.into()
+                } else {
+                    AUTH_PASSWORD.into()
+                },
+                key_path: if key.starts_with(r"\\") || (key.len() > 2 && key.as_bytes()[1] == b':')
+                {
+                    key
+                } else {
+                    String::new()
+                },
+                notes: parts
+                    .get(5)
+                    .map(|v| unescape(v).trim().to_owned())
+                    .unwrap_or_default(),
                 ..Host::default()
             };
-            out.push(FinalShellEntry { host, folders: folders.to_vec(), needs_key });
+            out.push(FinalShellEntry {
+                host,
+                folders: folders.to_vec(),
+                needs_key,
+            });
         }
     };
     for raw in text.lines() {
         let line = raw.trim();
-        if line.is_empty() || line.starts_with(';') { continue; }
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
         if line.starts_with('[') && line.ends_with(']') {
             flush(&mut pending, &folder, &mut out);
             let section = line[1..line.len() - 1].trim().to_ascii_lowercase();
-            bookmarks = section == "bookmarks" || section.strip_prefix("bookmarks_").is_some_and(|n| !n.is_empty() && n.parse::<u32>().is_ok());
+            bookmarks = section == "bookmarks"
+                || section
+                    .strip_prefix("bookmarks_")
+                    .is_some_and(|n| !n.is_empty() && n.parse::<u32>().is_ok());
             header = false;
             folder.clear();
             continue;
         }
-        if !bookmarks && !header { continue; }
-        let Some((key, value)) = line.split_once('=') else { continue; };
-        if bookmarks && key.trim().eq_ignore_ascii_case("SubRep") {
-            folder = value.split('\\').map(|s| unescape(s).trim().to_owned()).filter(|s| !s.is_empty()).collect();
+        if !bookmarks && !header {
             continue;
         }
-        if bookmarks && key.trim().eq_ignore_ascii_case("ImgNum") { continue; }
-        if header && value.matches('#').count() < 2 { continue; }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if bookmarks && key.trim().eq_ignore_ascii_case("SubRep") {
+            folder = value
+                .split('\\')
+                .map(|s| unescape(s).trim().to_owned())
+                .filter(|s| !s.is_empty())
+                .collect();
+            continue;
+        }
+        if bookmarks && key.trim().eq_ignore_ascii_case("ImgNum") {
+            continue;
+        }
+        if header && value.matches('#').count() < 2 {
+            continue;
+        }
         pending.push((key.trim().to_owned(), value.trim().to_owned()));
     }
     flush(&mut pending, &folder, &mut out);
-    if out.is_empty() { return Err(ImportError("no SSH sessions found in MobaXterm file".into())); }
+    if out.is_empty() {
+        return Err(ImportError(
+            "no SSH sessions found in MobaXterm file".into(),
+        ));
+    }
     Ok(out)
 }

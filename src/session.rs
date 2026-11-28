@@ -169,7 +169,6 @@ impl ConnectionManager {
         Ok(imported)
     }
 
-
     /// Import FinalShell's native connection directory without importing encrypted secrets.
     pub fn import_finalshell_dir(
         &mut self,
@@ -285,8 +284,10 @@ impl ConnectionManager {
             }
             let mut host = entry.host;
             if self.store.hosts.iter().any(|candidate| {
-                !candidate.deleted() && candidate.addr.eq_ignore_ascii_case(&host.addr)
-                    && candidate.port_or_22() == host.port_or_22() && candidate.user == host.user
+                !candidate.deleted()
+                    && candidate.addr.eq_ignore_ascii_case(&host.addr)
+                    && candidate.port_or_22() == host.port_or_22()
+                    && candidate.user == host.user
             }) {
                 continue;
             }
