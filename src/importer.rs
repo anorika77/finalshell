@@ -1251,6 +1251,9 @@ mod mobaxterm_tests {
         assert!(is_mobaxterm_bookmarks_section("bookmarks_12"));
         assert!(!is_mobaxterm_bookmarks_section("Bookmarks_x"));
         assert!(!is_mobaxterm_bookmarks_section("Bookmarks1"));
+        assert_eq!(moba_unescape("note__DIEZE__1__PTVIRG__ok"), "note#1;ok");
+        let (gbk, _, _) = encoding_rs::GBK.encode("实验室");
+        assert_eq!(decode_mobaxterm_text(&gbk), "实验室");
         assert!(is_windows_path(r"C:\keys\id_rsa"));
         assert!(is_windows_path(r"\\nas\keys\id_rsa"));
         assert!(!is_windows_path("/home/user/.ssh/id_rsa"));
